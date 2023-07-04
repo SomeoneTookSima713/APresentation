@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::ops::{ Deref, DerefMut };
 
 /// Like the [`Option`]-Enum, but it automatically dereferences and panics if it is [`None`]

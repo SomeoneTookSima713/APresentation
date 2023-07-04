@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
 use opengl_graphics::GlGraphics;
 use graphics::Context;
 use graphics;

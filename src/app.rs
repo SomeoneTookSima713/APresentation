@@ -1,4 +1,4 @@
-use opengl_graphics::{ GlGraphics, Texture, TextureSettings, OpenGL };
+use opengl_graphics::{ GlGraphics, OpenGL };
 use piston::{RenderArgs, UpdateArgs};
 
 use super::util::{ PanickingOption };
@@ -19,6 +19,7 @@ pub struct AppData {
     // font: super::render::font::Font
 }
 impl AppData {
+    #[allow(unused_variables)]
     pub fn create(app: &Application) -> AppData {
         let mut presentation = presentation::Presentation::new();
 
@@ -61,7 +62,6 @@ impl Application {
     }
 
     pub fn render(&mut self, args: &RenderArgs) {
-        use graphics::Transformed;
 
         const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
 
@@ -82,7 +82,7 @@ impl Application {
         self.data.time += args.dt;
         if self.data.time>= self.data.timeint as f64 + 1.0 {
             self.data.timeint += 1;
-            println!("FPS: {}", self.data.frames);
+            // println!("FPS: {}", self.data.frames);
             self.data.frames = 0;
         }
     }

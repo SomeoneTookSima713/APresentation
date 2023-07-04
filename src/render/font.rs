@@ -11,6 +11,7 @@ pub struct Font {
     base: freetype::Face
 }
 
+#[allow(dead_code)]
 impl Font {
     pub fn new<P: AsRef<Path>, F: Into<DefaultingOption<isize>>>(app: &Application, path: P, face_index: F) -> Option<Font> {
         let face_index_option: DefaultingOption<isize> = face_index.into();

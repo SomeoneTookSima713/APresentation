@@ -1,14 +1,15 @@
+#![allow(dead_code)]
+
 use std::collections::HashMap;
-use std::marker::PhantomData;
 
 use opengl_graphics::GlGraphics;
 use graphics::Context;
-use once_cell::sync::Lazy;
 
 use crate::util::DefaultingOption;
 use super::util::SimplestHasher;
 use super::renderable;
 
+#[allow(non_snake_case)]
 fn DEFAULT_BACKGROUND_RENDERABLE<'a>() -> renderable::ColoredRect<'a> {
     renderable::ColoredRect::new("0;0", "w;h", "1;1;1;1", "TOP_LEFT")
 }

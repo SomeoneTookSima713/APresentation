@@ -1,6 +1,7 @@
-use opengl_graphics::{GlGraphics, Texture, TextureSettings, Filter, Wrap};
+#![allow(dead_code)]
+
+use opengl_graphics::{GlGraphics, Texture, TextureSettings, Wrap};
 use graphics::{Image, DrawState, Context};
-use graphics::rectangle;
 use std::path::Path;
 
 lazy_static::lazy_static! {
