@@ -10,6 +10,7 @@ authors = [
 
 [dependencies]
 lazy_static = "1.4"
+regex = "1"
 once_cell = "1.18"
 piston = "0.53.0"
 piston2d-graphics = "0.43.0"

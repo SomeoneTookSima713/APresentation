@@ -137,6 +137,7 @@ impl TextFont {
 
 use std::cell::RefCell;
 
+#[derive(Clone)]
 pub enum TextPart<'a> {
     Text {
         text: String,
@@ -159,10 +160,32 @@ pub struct Text<'a> {
 }
 
 impl<'a> Text<'a> {
-    fn parse<'b>(string: String, base_size: util::ResolutionDependentExpr<'b>, base_font: TextFont, bold: bool, italic: bool, color: util::ExprVector<'a, 4>) -> Vec<TextPart<'b>> {
-        let vec = Vec::new();
-        
-        // TODO
+    fn parse<'b>(string: String, base_size: util::ResolutionDependentExpr<'b>, base_font: TextFont, bold: bool, italic: bool, color: util::ExprVector<'b, 4>) -> Vec<TextPart<'b>> {
+        use regex::{ Regex, Match };
+        lazy_static::lazy_static! {
+            static ref BOLD_REGEX: Regex = Regex::new(r"\*\*(?<content>.+?)\*\*").unwrap();
+            static ref ITALIC_REGEX: Regex = Regex::new(r"\*(?<content>.+?)\*").unwrap();
+            static ref FONT_REGEX: Regex = Regex::new(r"_(?<font>.+?)_(?<content>.+?)__").unwrap();
+            static ref COLOR_REGEX: Regex = Regex::new(r"`(?<r>\d+),\s*(?<g>\d+),\s*(?<b>\d+)`(?<content>.+?)``").unwrap();
+            static ref SIZE_REGEX: Regex = Regex::new(r"~(?<size>\d+?)~(?<content>.+?)~~").unwrap();
+        }
+
+        let mut vec = Vec::new();
+
+        let bold_matches: Vec<Match<'_>> = BOLD_REGEX.find_iter(&string).collect();
+
+        if bold_matches.is_empty() {
+            vec.push(TextPart::Text { text: string, bold, italic, color: color.clone(), size: base_size.clone(), font: RefCell::new(base_font.clone()) })
+        } else {
+            vec.push(TextPart::Text { text: string[0..bold_matches[0].start()].to_owned(), bold, italic, color: color.clone(), size: base_size.clone(), font: RefCell::new(base_font.clone()) });
+            for m in bold_matches.iter() {
+                vec.push(TextPart::Text { text: string[m.start()..m.end()].to_owned(), bold: true, italic, color: color.clone(), size: base_size.clone(), font: RefCell::new(base_font.clone()) });
+            }
+        }
+
+        for (i, part) in vec.iter().map(|v| v.clone()).collect::<Vec<TextPart<'_>>>().into_iter().enumerate() {
+            // let italic_matcher: Vec<Match<'_>> = ITALIC_REGEX.find_iter(&part.)
+        }
 
         vec
     }
