@@ -1,8 +1,10 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
+use std::collections::HashMap;
+
 use opengl_graphics::GlGraphics;
-use graphics::Context;
+use graphics::{ Context, Transformed };
 use graphics;
 use super::util;
 
@@ -52,7 +54,7 @@ impl<'a> Renderable for ColoredRect<'a> {
 impl<'a> ColoredRect<'a> {
     pub fn new<PosStr, SizeStr, ColorStr, AlignStr>(pos: PosStr, size: SizeStr, color: ColorStr, alignment: AlignStr) -> Self
     where PosStr: Into<String>, SizeStr: Into<String>, ColorStr: Into<String>, AlignStr: Into<String> {
-        ColoredRect { pos: util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).into(), size: util::parse_expression_list(size, &util::DEFAULT_CONTEXT).into(), color: util::parse_expression_list(color, &util::DEFAULT_CONTEXT).into(), alignment: <AlignStr as Into<String>>::into(alignment).into() }
+        ColoredRect { pos: util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).try_into().unwrap(), size: util::parse_expression_list(size, &util::DEFAULT_CONTEXT).try_into().unwrap(), color: util::parse_expression_list(color, &util::DEFAULT_CONTEXT).try_into().unwrap(), alignment: <AlignStr as Into<String>>::into(alignment).into() }
     }
 }
 
@@ -99,9 +101,9 @@ impl<'a> RoundedRect<'a> {
     pub fn new<PosStr, SizeStr, ColorStr, RoundingStr, AlignStr>(pos: PosStr, size: SizeStr, color: ColorStr, corner_rounding: RoundingStr, alignment: AlignStr) -> Self
     where PosStr: Into<String>, SizeStr: Into<String>, ColorStr: Into<String>, RoundingStr: Into<String>, AlignStr: Into<String> {
         RoundedRect {
-            pos: util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).into(),
-            size: util::parse_expression_list(size, &util::DEFAULT_CONTEXT).into(),
-            color: util::parse_expression_list(color, &util::DEFAULT_CONTEXT).into(),
+            pos: util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).try_into().unwrap(),
+            size: util::parse_expression_list(size, &util::DEFAULT_CONTEXT).try_into().unwrap(),
+            color: util::parse_expression_list(color, &util::DEFAULT_CONTEXT).try_into().unwrap(),
             corner_rounding: util::res_dependent_expr(corner_rounding, &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased),
             alignment: <AlignStr as Into<String>>::into(alignment).into()
         }
@@ -138,76 +140,150 @@ impl TextFont {
 use std::cell::RefCell;
 
 #[derive(Clone)]
-pub enum TextPart<'a> {
+pub enum TextPart<'a, 'font> {
     Text {
         text: String,
         bold: bool,
         italic: bool,
         color: util::ExprVector<'a, 4>,
         size: util::ResolutionDependentExpr<'a>,
-        font: RefCell<TextFont>
+        font: &'font RefCell<TextFont>
     },
     Tab,
     NewLine
 }
 
+impl<'a, 'font> std::fmt::Debug for TextPart<'a, 'font> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TextPart::Text { text, bold, italic, color, size, font } => { write!(f, "\"{}\"", text) },
+            TextPart::Tab => { write!(f, "\\t") },
+            TextPart::NewLine => { write!(f, "\\n") }
+        }
+    }
+}
+
+impl<'a, 'font> TextPart<'a, 'font> {
+    pub fn set_bold(&mut self, set: bool) {
+        match self {
+            TextPart::Text { text, bold, italic, color, size, font } => *bold = set,
+            _ => {}
+        }
+    }
+    pub fn set_italic(&mut self, set: bool) {
+        match self {
+            TextPart::Text { text, bold, italic, color, size, font } => *italic = set,
+            _ => {}
+        }
+    }
+    pub fn set_color(&mut self, set: String) {
+        match self {
+            TextPart::Text { text, bold, italic, color, size, font } => *color = util::parse_expression_list(set, &util::DEFAULT_CONTEXT).try_into().unwrap(),
+            _ => {}
+        }
+    }
+    pub fn set_size(&mut self, set: String) {
+        match self {
+            TextPart::Text { text, bold, italic, color, size, font } => *size = util::res_dependent_expr(set, &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased),
+            _ => {}
+        }
+    }
+    pub fn set_font(&mut self, set: &'font RefCell<TextFont>) {
+        match self {
+            TextPart::Text { text, bold, italic, color, size, font } => *font = set,
+            _ => {}
+        }
+    }
+}
+
 pub struct Text<'a> {
     pos: util::ExprVector<'a, 2>,
-    text: Vec<TextPart<'a>>,
+    text: Vec<TextPart<'a, 'a>>,
     wrapping_width: util::ResolutionDependentExpr<'a>,
     size: util::ResolutionDependentExpr<'a>,
     alignment: util::Alignment
 }
 
 impl<'a> Text<'a> {
-    fn parse<'b>(string: String, base_size: util::ResolutionDependentExpr<'b>, base_font: TextFont, bold: bool, italic: bool, color: util::ExprVector<'b, 4>) -> Vec<TextPart<'b>> {
-        use regex::{ Regex, Match };
+    fn parse<'b, S: AsRef<str>>(string: String, base_size: util::ResolutionDependentExpr<'b>, base_font: S, bold: bool, italic: bool, color: util::ExprVector<'b, 4>, font_list: &'static HashMap<String, RefCell<TextFont>>) -> Vec<TextPart<'b, 'b>> {
+        use regex::{ Regex, Match, Captures };
+        use std::sync::{ Arc, Mutex, OnceLock };
         lazy_static::lazy_static! {
             static ref BOLD_REGEX: Regex = Regex::new(r"\*\*(?<content>.+?)\*\*").unwrap();
             static ref ITALIC_REGEX: Regex = Regex::new(r"\*(?<content>.+?)\*").unwrap();
             static ref FONT_REGEX: Regex = Regex::new(r"_(?<font>.+?)_(?<content>.+?)__").unwrap();
-            static ref COLOR_REGEX: Regex = Regex::new(r"`(?<r>\d+),\s*(?<g>\d+),\s*(?<b>\d+)`(?<content>.+?)``").unwrap();
+            static ref COLOR_REGEX: Regex = Regex::new(r"`(?<r>\d+);\s*(?<g>\d+);\s*(?<b>\d+)`(?<content>.+?)``").unwrap();
             static ref SIZE_REGEX: Regex = Regex::new(r"~(?<size>\d+?)~(?<content>.+?)~~").unwrap();
         }
-
-        let mut vec = Vec::new();
-
-        let bold_matches: Vec<Match<'_>> = BOLD_REGEX.find_iter(&string).collect();
-
-        if bold_matches.is_empty() {
-            vec.push(TextPart::Text { text: string, bold, italic, color: color.clone(), size: base_size.clone(), font: RefCell::new(base_font.clone()) })
-        } else {
-            vec.push(TextPart::Text { text: string[0..bold_matches[0].start()].to_owned(), bold, italic, color: color.clone(), size: base_size.clone(), font: RefCell::new(base_font.clone()) });
-            for m in bold_matches.iter() {
-                vec.push(TextPart::Text { text: string[m.start()..m.end()].to_owned(), bold: true, italic, color: color.clone(), size: base_size.clone(), font: RefCell::new(base_font.clone()) });
-            }
+        static REGEXES: OnceLock<[Regex; 5]> = OnceLock::new();
+        if REGEXES.get().is_none() {
+            REGEXES.set([
+                SIZE_REGEX.clone(),
+                FONT_REGEX.clone(),
+                BOLD_REGEX.clone(),
+                ITALIC_REGEX.clone(), 
+                COLOR_REGEX.clone(), 
+            ]).map_err(|_| "error initializing regex list").unwrap();
         }
 
-        for (i, part) in vec.iter().map(|v| v.clone()).collect::<Vec<TextPart<'_>>>().into_iter().enumerate() {
-            // let italic_matcher: Vec<Match<'_>> = ITALIC_REGEX.find_iter(&part.)
+        let regex_fns: [Box<dyn Fn(&mut TextPart, &Captures, &'static HashMap<String, RefCell<TextFont>>)>; 5] = [
+            Box::new(|part, captures, fonts| part.set_size(captures.name("size").unwrap().as_str().to_string())),
+            Box::new(|part, captures, fonts| part.set_font(fonts.get(captures.name("font").unwrap().as_str()).unwrap())),
+            Box::new(|part, captures, fonts| part.set_bold(true)),
+            Box::new(|part, captures, fonts| part.set_italic(true)),
+            Box::new(|part, captures, fonts| part.set_color(format!("{};{};{};1.0",captures.name("r").unwrap().as_str(),captures.name("g").unwrap().as_str(),captures.name("b").unwrap().as_str()))),
+        ];
+
+        let mut vec = vec![ TextPart::Text { text: string, bold, italic, color, size: base_size, font: font_list.get(base_font.as_ref()).unwrap() } ];
+
+        let mut construct_vec = Vec::new();
+
+        for (i, regex) in REGEXES.get().unwrap().iter().enumerate() {
+            for text_part in vec.into_iter() {
+                match text_part {
+                    TextPart::Text { ref text, bold, italic, color, size, font } => {
+                        let mut last_match_end: usize = 0;
+                        for text_captures in regex.captures_iter(text) {
+                            let text_match = text_captures.get(0).unwrap();
+                            let text_content = text_captures.name("content").unwrap();
+                            construct_vec.push(TextPart::Text { text: text[last_match_end..text_match.start()].to_string(), bold, italic, color: color.clone(), size: size.clone(), font });
+                            let mut modified = TextPart::Text { text: text[text_content.start()..text_content.end()].to_string(), bold, italic, color: color.clone(), size: size.clone(), font };
+                            (regex_fns[i])(&mut modified, &text_captures, font_list);
+                            construct_vec.push(modified);
+                            last_match_end = text_match.end();
+                        }
+                        construct_vec.push(TextPart::Text { text: text[last_match_end..].to_string(), bold, italic, color: color.clone(), size: size.clone(), font })
+                    },
+                    _ => construct_vec.push(text_part)
+                }
+            }
+            vec = std::mem::replace(&mut construct_vec, Vec::new());
         }
 
         vec
     }
 
-    pub fn new<PosStr, TextStr, WidthStr, SizeStr, AlignStr, ColStr>(pos: PosStr, text: Vec<TextStr>, wrapping_width: WidthStr, size: SizeStr, alignment: AlignStr, color: ColStr, base_font: TextFont) -> Text<'a>
+    pub fn new<PosStr, TextStr, WidthStr, SizeStr, AlignStr, ColStr>(pos: PosStr, text: Vec<TextStr>, wrapping_width: WidthStr, size: SizeStr, alignment: AlignStr, color: ColStr, base_font: String, font_list: &'static HashMap<String, RefCell<TextFont>>) -> Text<'a>
     where PosStr: Into<String>, TextStr: Into<String>, WidthStr: Into<String>, SizeStr: Into<String>, AlignStr: Into<String>, ColStr: Into<String> {
         let mut text_parts = Vec::new();
 
         let size_expr = util::res_dependent_expr(<SizeStr as Into<String>>::into(size), &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased);
 
-        let col_expr: util::ExprVector<4> = util::parse_expression_list(<ColStr as Into<String>>::into(color), &util::DEFAULT_CONTEXT).into();
+        let col_expr: util::ExprVector<4> = util::parse_expression_list(<ColStr as Into<String>>::into(color), &util::DEFAULT_CONTEXT).try_into().unwrap();
 
         for into_string in text {
             let string: String = into_string.into();
 
-            text_parts.append(&mut Text::parse(string, size_expr.clone(), base_font.clone(), false, false, col_expr.clone()));
+            text_parts.append(&mut Text::parse(string, size_expr.clone(), base_font.clone(), false, false, col_expr.clone(), font_list));
 
             text_parts.push(TextPart::NewLine);
         }
 
+        // DEBUG: Check if the parsed text actually got parsed correctly
+        // println!("{:?}",text_parts);
+
         Text {
-            pos: util::parse_expression_list(<PosStr as Into<String>>::into(pos), &util::DEFAULT_CONTEXT).into(),
+            pos: util::parse_expression_list(<PosStr as Into<String>>::into(pos), &util::DEFAULT_CONTEXT).try_into().unwrap(),
             text: text_parts,
             wrapping_width: util::res_dependent_expr(<WidthStr as Into<String>>::into(wrapping_width), &util::DEFAULT_CONTEXT, util::ResExprType::WidthBased),
             size: size_expr,
@@ -253,7 +329,7 @@ impl<'a> Renderable for Text<'a> {
         let starting_pos = (current_pos.0 - max_width*alignment.0, current_pos.1 - height*alignment.1);
         current_pos = (current_pos.0 - max_width*alignment.0, current_pos.1 - height*alignment.1);
 
-        curr_max_height = 0.0;
+        // curr_max_height = 0.0;
 
         // Draw the text
         for part in self.text.iter() {
@@ -264,7 +340,7 @@ impl<'a> Renderable for Text<'a> {
                 TextPart::NewLine => {
                     current_pos.0 = starting_pos.0;
                     current_pos.1 += curr_max_height;
-                    curr_max_height = 0.0;
+                    // curr_max_height = 0.0;
                 },
                 TextPart::Text { text, bold, italic, color, size, font } => {
                     let part_font_size = size.evaluate(view_size[0], view_size[1], time);
@@ -282,14 +358,58 @@ impl<'a> Renderable for Text<'a> {
                     if current_pos.0 + part_size.0 > max_width {
                         current_pos.0 = starting_pos.0;
                         current_pos.1 += curr_max_height;
-                        curr_max_height = 0.0;
+                        // curr_max_height = 0.0;
                     }
 
-                    font_instance.draw(text, part_font_size as u32, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &context, opengl).unwrap();
+                    let ctx = context.trans(current_pos.0, current_pos.1);
+
+                    font_instance.draw(text, part_font_size as u32, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl).unwrap();
 
                     current_pos.0 += part_size.0;
                 }
             }
         }
+    }
+}
+
+use graphics::Image as ImageRect;
+use opengl_graphics::Texture;
+use meval::Context as MContext;
+use std::path::Path;
+use std::pin::Pin;
+pub struct Image<'a> {
+    pos: util::ExprVector<'a, 2>,
+    size: util::ExprVector<'a, 2>,
+    alignment: util::Alignment,
+    texture: Texture
+}
+
+impl<'a> Image<'a> {
+    pub fn new<P: AsRef<Path>, PosStr, SizeStr, AlignStr>(path: P, pos: PosStr, size: SizeStr, alignment: AlignStr) -> Self
+    where PosStr: Into<String>, SizeStr: Into<String>, AlignStr: Into<String> {
+        use crate::render::sprite::DEFAULT_TEXTURE_SETTINGS;
+
+        let texture = Texture::from_path(path, &DEFAULT_TEXTURE_SETTINGS).unwrap();
+
+        let parsed_pos = util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).try_into().unwrap();
+        let parsed_size = util::parse_expression_list(size, &util::DEFAULT_CONTEXT).try_into().unwrap();
+        let parsed_alignment = <AlignStr as Into<String>>::into(alignment).into();
+
+        Self { pos: parsed_pos, size: parsed_size, alignment: parsed_alignment, texture }
+    }
+}
+
+impl<'a> Renderable for Image<'a> {
+    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
+        use graphics::DrawState;
+
+        let view_size = context.get_view_size();
+        let pos_eval = self.pos.evaluate_tuple(view_size[0], view_size[1], time);
+        let size_eval = self.size.evaluate_tuple(view_size[0], view_size[1], time);
+        let alignment: (f64, f64) = self.alignment.into();
+
+        let rect = ImageRect::new().rect([pos_eval.0,pos_eval.1,size_eval.0,size_eval.1]);
+
+        rect.draw(&self.texture, &DrawState::default(), context.transform, opengl);
     }
 }

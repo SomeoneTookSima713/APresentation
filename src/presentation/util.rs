@@ -153,9 +153,18 @@ impl<'a, const N: usize> From<[ResolutionDependentExpr<'a>; N]> for ExprVector<'
     }
 }
 
-impl<'a, const N: usize> From<Vec<ResolutionDependentExpr<'a>>> for ExprVector<'a, N> {
-    fn from(value: Vec<ResolutionDependentExpr<'a>>) -> Self {
-        ExprVector { list: value.try_into().unwrap() }
+// impl<'a, const N: usize> From<Vec<ResolutionDependentExpr<'a>>> for ExprVector<'a, N> {
+//     fn from(value: Vec<ResolutionDependentExpr<'a>>) -> Self {
+//         ExprVector { list: value.try_into().unwrap() }
+//     }
+// }
+
+impl<'a, const N: usize> TryFrom<Vec<ResolutionDependentExpr<'a>>> for ExprVector<'a, N> {
+    type Error = String;
+
+    fn try_from(value: Vec<ResolutionDependentExpr<'a>>) -> Result<Self, Self::Error> {
+        let list = value.try_into().map_err(|_| format!("amount of given Expressions doesn't match the required amount of {}", N))?;
+        Ok(ExprVector { list })
     }
 }
 

@@ -52,7 +52,7 @@ impl Font {
             use graphics::*;
 
             let transform;
-            if italic { transform = c.transform.shear(size as f64 / -220.0, 0.0).trans(x, y) } else { transform = c.transform.trans(x, y) }
+            if italic { transform = c.transform.shear(size as f64 / -140.0, 0.0).trans(x, y) } else { transform = c.transform.trans(x, y) }
 
             Image::new_color(color).draw(
                 texture,
@@ -76,8 +76,8 @@ impl Font {
     }
 
     pub fn size<Str: Into<String>>(&self, text: Str, size: u32) -> Result<(f64, f64), freetype::error::Error> {
-        let mut text_string: String = text.into();
-        text_string.push(' ');
+        let text_string: String = text.into();
+        // text_string.push(' ');
         self.base.set_pixel_sizes(0, size)?;
         let glyphs = self.glyphs(&text_string);
         let size = glyphs[glyphs.len()-1].1;

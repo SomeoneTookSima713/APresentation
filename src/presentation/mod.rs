@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use opengl_graphics::GlGraphics;
 use graphics::Context;
 
@@ -21,7 +23,7 @@ impl Presentation {
     pub fn add_slide(&mut self, slide: slide::Slide) {
         self.slides.push(slide);
     }
-
+    
     pub fn render(&mut self, time: f64, context: Context, opengl: &mut GlGraphics) {
         match self.slides.get(self.current_slide) {
             Some(slide) => {

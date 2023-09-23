@@ -79,3 +79,23 @@ impl<T> DefaultingOption<T> {
         }
     }
 }
+
+/// Wrapper that is always Send or Sync, independant of the contents.
+pub struct AssumeThreadSafe<T>(pub T);
+
+unsafe impl<T> Send for AssumeThreadSafe<T> {}
+unsafe impl<T> Sync for AssumeThreadSafe<T> {}
+
+impl<T> Deref for AssumeThreadSafe<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for AssumeThreadSafe<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
