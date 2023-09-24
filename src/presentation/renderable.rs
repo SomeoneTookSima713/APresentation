@@ -2,18 +2,25 @@
 #![allow(unused_variables)]
 
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 use opengl_graphics::GlGraphics;
 use graphics::{ Context, Transformed };
 use graphics;
 use super::util;
 
-pub trait Renderable {
+pub trait Renderable: Debug {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics);
 }
 
 pub struct RenderableRef<'a> {
     reference: &'a dyn Renderable
+}
+
+impl<'a> From<&'a dyn Renderable> for RenderableRef<'a> {
+    fn from(reference: &'a dyn Renderable) -> Self {
+        Self { reference }
+    }
 }
 
 impl<'a, R: Renderable> From<&'a R> for RenderableRef<'a> {
@@ -31,7 +38,13 @@ impl<'a> Renderable for RenderableRef<'a> {
         self.reference.render(time, context, opengl);
     }
 }
+impl<'a> Debug for RenderableRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.reference.fmt(f)
+    }
+}
 
+#[derive(Debug)]
 pub struct ColoredRect<'a> {
     pos: util::ExprVector<'a, 2>,
     size: util::ExprVector<'a, 2>,
@@ -58,6 +71,7 @@ impl<'a> ColoredRect<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct RoundedRect<'a> {
     pos: util::ExprVector<'a, 2>,
     size: util::ExprVector<'a, 2>,
@@ -115,8 +129,8 @@ use crate::app::Application;
 
 #[derive(Clone)]
 pub struct TextFont {
-    base_font: font::Font,
-    bold_font: font::Font
+    pub base_font: font::Font,
+    pub bold_font: font::Font
 }
 impl TextFont {
     /// Creates a new [`TextFont`]
@@ -196,6 +210,7 @@ impl<'a, 'font> TextPart<'a, 'font> {
     }
 }
 
+#[derive(Debug)]
 pub struct Text<'a> {
     pos: util::ExprVector<'a, 2>,
     text: Vec<TextPart<'a, 'a>>,
@@ -374,14 +389,20 @@ impl<'a> Renderable for Text<'a> {
 
 use graphics::Image as ImageRect;
 use opengl_graphics::Texture;
-use meval::Context as MContext;
 use std::path::Path;
-use std::pin::Pin;
+
 pub struct Image<'a> {
     pos: util::ExprVector<'a, 2>,
     size: util::ExprVector<'a, 2>,
     alignment: util::Alignment,
+    texture_path: String,
     texture: Texture
+}
+
+impl<'a> Debug for Image<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Image{{ pos: {:?}, size: {:?}, alignment: {:?}, texture: {} }}",self.pos,self.size,self.alignment,self.texture_path)
+    }
 }
 
 impl<'a> Image<'a> {
@@ -389,13 +410,14 @@ impl<'a> Image<'a> {
     where PosStr: Into<String>, SizeStr: Into<String>, AlignStr: Into<String> {
         use crate::render::sprite::DEFAULT_TEXTURE_SETTINGS;
 
+        let texture_path = path.as_ref().to_str().unwrap().to_owned();
         let texture = Texture::from_path(path, &DEFAULT_TEXTURE_SETTINGS).unwrap();
 
         let parsed_pos = util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).try_into().unwrap();
         let parsed_size = util::parse_expression_list(size, &util::DEFAULT_CONTEXT).try_into().unwrap();
         let parsed_alignment = <AlignStr as Into<String>>::into(alignment).into();
 
-        Self { pos: parsed_pos, size: parsed_size, alignment: parsed_alignment, texture }
+        Self { pos: parsed_pos, size: parsed_size, alignment: parsed_alignment, texture, texture_path }
     }
 }
 
@@ -408,7 +430,7 @@ impl<'a> Renderable for Image<'a> {
         let size_eval = self.size.evaluate_tuple(view_size[0], view_size[1], time);
         let alignment: (f64, f64) = self.alignment.into();
 
-        let rect = ImageRect::new().rect([pos_eval.0,pos_eval.1,size_eval.0,size_eval.1]);
+        let rect = ImageRect::new().rect([pos_eval.0-size_eval.0*alignment.0,pos_eval.1-size_eval.1*alignment.1,size_eval.0,size_eval.1]);
 
         rect.draw(&self.texture, &DrawState::default(), context.transform, opengl);
     }

@@ -8,7 +8,7 @@ use crate::util::{ DefaultingOption };
 
 #[derive(Clone)]
 pub struct Font {
-    base: freetype::Face
+    pub base: freetype::Face
 }
 
 #[allow(dead_code)]

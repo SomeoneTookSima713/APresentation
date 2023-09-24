@@ -3,8 +3,8 @@ use std::cell::{ RefCell };
 use std::sync::OnceLock;
 
 use opengl_graphics::{ GlGraphics, OpenGL };
-use piston::{RenderArgs, UpdateArgs};
-use piston_window::{PistonWindow, WindowSettings};
+use piston::{RenderArgs, UpdateArgs, ButtonArgs, Button, ButtonState, Key};
+use piston_window::PistonWindow;
 
 use super::util::{ PanickingOption, AssumeThreadSafe };
 use super::presentation;
@@ -22,36 +22,60 @@ pub struct AppData {
     presentation: presentation::Presentation,
     time: f64,
     timeint: u32,
-    frames: u32
+    frames: u32,
+    last_press: (bool, bool)
     // font: super::render::font::Font
 }
 impl AppData {
     #[allow(unused_variables)]
-    pub fn create(app: &Application) -> AppData {
+    pub fn create(app: &Application, filepath: String) -> AppData {
+        // Testing if my parsing logic actually works
+        let document: crate::parse::Document = deser_hjson::from_str(std::fs::read_to_string(filepath).unwrap().as_str()).unwrap();
+
         FONTS.set({
             let mut map = HashMap::new();
 
-            map.insert("Rubik".to_owned(), RefCell::new(presentation::renderable::TextFont::new(app, "assets/Rubik-Regular.ttf", "assets/Rubik-Bold.ttf")));
+            let bytes = include_bytes!("OpenSans.ttf");
+            let vec: Vec<u8> = bytes.into_iter().map(|r|*r).collect();
+
+            let face = app.freetype_instance.new_memory_face(std::rc::Rc::new(vec), 0).unwrap();
+
+            let font = crate::render::font::Font { base: face };
+
+            map.insert("Default".to_owned(), RefCell::new(presentation::TextFont { base_font: font.clone(), bold_font: font.clone() }));
+
+            for (name, path) in document.fonts {
+                map.insert(name, RefCell::new(presentation::renderable::TextFont::new(app, path.0, path.1)));
+            }
 
             AssumeThreadSafe(map)
         }).ok().expect("error initializing fonts");
 
         let mut presentation = presentation::Presentation::new();
 
-        let mut slide = presentation::Slide::new(None);
-        // slide.add(presentation::ColoredRect::new("0.04*h;0.04*h", "0.1*h;0.1*h", "0.8;0.8;0.07;1.0"), 0);
+        for slide_data in document.slides {
+            let mut slide = presentation::Slide::new(slide_data.background);
+            for (z, content) in slide_data.content {
+                for renderable in content {
+                    slide.add_boxed(renderable, z);
+                }
+            }
+            presentation.add_slide(slide);
+        }
 
-        slide.add(presentation::RoundedRect::new("50%;50%", "0.1*h;0.1*h", "0.8;0.8;0.07;1.0", "60+sin(t)*20", "MID_CENTERED"), 0);
-        slide.add(presentation::renderable::Text::new("10%;120", vec!["This is a **Test**.", "If everything works, *this* should be italic."], "40%", "12 * w/1280", "TOP_LEFT", "0.0;0.0;0.0;1.0", "Rubik".to_owned(), FONTS.get().unwrap()), 1);
-        slide.add(presentation::Image::new(r"D:\Daten\Simon Schneider\Bilder\IMG_20221227_203322.jpg", "15%+sin(t)*2%;15%+cos(t)*2%", "20%;20%", "TOP_LEFT"),2);
+        let mut last_slide = presentation::Slide::new(Box::new(presentation::ColoredRect::new("0;0", "w;h", "0;0;0;1", "TOP_LEFT")) as Box<dyn presentation::Renderable>);
+        last_slide.add(presentation::Text::new("0;4%", vec!["End of presentation"], "w", "4%", "TOP_LEFT", "1;1;1;1", "Default".to_owned(), &*FONTS.get().unwrap()), 0);
 
-        presentation.add_slide(slide);
+        presentation.add_slide(last_slide);
+
+        // println!("{:?}", document);
 
         AppData {
             presentation,
             time: 0.0,
             timeint: 0,
             frames: 0,
+            last_press: (false, false)
             // font: super::render::font::Font::new(app, "assets/Rubik-Regular.ttf", 0).unwrap()
         }
     }
@@ -63,7 +87,7 @@ impl Application {
 
         Application { opengl_version, freetype_instance, opengl_backend: PanickingOption::None, data: PanickingOption::None }
     }
-    pub fn init<Str: Into<String>>(&mut self, title: Str, resolution: (u32, u32), vsync: bool, resizable: bool, decoration: bool) -> PistonWindow {
+    pub fn init<Str: Into<String>>(&mut self, title: Str, resolution: (u32, u32), vsync: bool, resizable: bool, decoration: bool, filepath: String) -> PistonWindow {
         let window = piston::window::WindowSettings::new(title.into(), [resolution.0,resolution.1])
             .graphics_api(self.opengl_version)
             .exit_on_esc(true)
@@ -74,7 +98,7 @@ impl Application {
             .unwrap();
         self.opengl_backend = PanickingOption::Some(GlGraphics::new(self.opengl_version));
 
-        self.data = PanickingOption::Some(AppData::create(&self));
+        self.data = PanickingOption::Some(AppData::create(&self, filepath));
 
         window
     }
@@ -102,6 +126,27 @@ impl Application {
             self.data.timeint += 1;
             // println!("FPS: {} / {}", self.data.frames, 1.0/args.dt);
             self.data.frames = 0;
+        }
+    }
+
+    pub fn input(&mut self, args: &ButtonArgs) {
+        match (args.button, args.state, self.data.last_press) {
+            (Button::Keyboard(Key::A | Key::Left), ButtonState::Press, (false, _)) => {
+                self.data.presentation.previous_slide();
+                self.data.last_press.0 = true;
+            },
+            (Button::Keyboard(Key::A | Key::Left), ButtonState::Release, (true, _)) => {
+                self.data.last_press.0 = false;
+            },
+
+            (Button::Keyboard(Key::D | Key::Right), ButtonState::Press, (_, false)) => {
+                self.data.presentation.next_slide();
+                self.data.last_press.1 = true;
+            },
+            (Button::Keyboard(Key::D | Key::Right), ButtonState::Release, (_, true)) => {
+                self.data.last_press.1 = false;
+            },
+            _ => {}
         }
     }
 }

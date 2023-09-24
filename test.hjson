@@ -1,0 +1,31 @@
+{
+fonts: {
+    Rubik: ["assets/Rubik-Regular.ttf", "assets/Rubik-Bold.ttf"]
+},
+slides: [
+    {
+        background: [1.0, 0.8, 0.6],
+        content: [
+            {
+                type: Image,
+                pos: "50%;50%",
+                size: "50%;50%",
+                alignment: "MID_CENTERED",
+                path: "D:\\Daten\\Simon Schneider\\Bilder\\IMG_20221227_203322.jpg"
+            }
+        ]
+    },
+    {
+        background: [0.8, 1.0, 0.6],
+        content: [
+            {
+                type: Image,
+                pos: "40%;40%",
+                size: "50%;50%",
+                alignment: "MID_CENTERED",
+                path: "D:\\Daten\\Simon Schneider\\Bilder\\IMG_20221227_203322.jpg"
+            }
+        ]
+    }
+]
+}

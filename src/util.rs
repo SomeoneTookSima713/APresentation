@@ -80,7 +80,7 @@ impl<T> DefaultingOption<T> {
     }
 }
 
-/// Wrapper that is always Send or Sync, independant of the contents.
+/// Wrapper that is always [`Send`] and [`Sync`], independant of the contents.
 pub struct AssumeThreadSafe<T>(pub T);
 
 unsafe impl<T> Send for AssumeThreadSafe<T> {}

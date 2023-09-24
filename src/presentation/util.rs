@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Alignment {
     TopLeft,
     TopRight,
@@ -132,7 +132,7 @@ impl<'a> Clone for ResolutionDependentExpr<'a> {
 use std::fmt::Debug;
 impl<'a> Debug for ResolutionDependentExpr<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ResolutionDependentExpr()")
+        write!(f, "ResolutionDependentExpr({})", self.base_string)
     }
 }
 
@@ -145,6 +145,19 @@ impl<'a> ResolutionDependentExpr<'a> {
 #[derive(Clone)]
 pub struct ExprVector<'a, const N: usize> {
     pub(self) list: [ResolutionDependentExpr<'a>; N]
+}
+
+impl<'a, const N: usize> Debug for ExprVector<'a, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ExprVector<{}>(", N)?;
+        for (i, expr) in self.list.iter().enumerate() {
+            write!(f,"{:?}", expr)?;
+            if i<N-1 {
+                write!(f,", ")?;
+            }
+        }
+        write!(f, ")")
+    }
 }
 
 impl<'a, const N: usize> From<[ResolutionDependentExpr<'a>; N]> for ExprVector<'a, N> {

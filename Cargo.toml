@@ -20,5 +20,4 @@ piston2d-opengl_graphics = "0.82.0"
 freetype-rs = "0.32.0"
 meval = "0.2"
 serde = { version = "1.0", features = ["derive"] }
-serde_derive = "1.0"
 deser-hjson = "2.1.0"

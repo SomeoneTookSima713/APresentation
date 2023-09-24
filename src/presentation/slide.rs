@@ -43,6 +43,15 @@ impl Slide {
         }
     }
 
+    pub fn add_boxed<Z: Into<DefaultingOption<u8>>>(&mut self, obj: Box<dyn renderable::Renderable>, z_index: Z) {
+        let z = <Z as Into<DefaultingOption<u8>>>::into(z_index).consume(0);
+        if self.objects.contains_key(&z) {
+            self.objects.get_mut(&z).unwrap().push(obj)
+        } else {
+            self.objects.insert(z, vec![obj]);
+        }
+    }
+
     pub fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
         self.background.render(time, context, opengl);
         for (_, vec) in self.objects.iter() {

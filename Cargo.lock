@@ -18,7 +18,6 @@ dependencies = [
  "pistoncore-glutin_window",
  "regex",
  "serde",
- "serde_derive",
 ]
 
 [[package]]
