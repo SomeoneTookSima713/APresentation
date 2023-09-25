@@ -221,8 +221,8 @@ pub struct Text<'a> {
 
 impl<'a> Text<'a> {
     fn parse<'b, S: AsRef<str>>(string: String, base_size: util::ResolutionDependentExpr<'b>, base_font: S, bold: bool, italic: bool, color: util::ExprVector<'b, 4>, font_list: &'static HashMap<String, RefCell<TextFont>>) -> Vec<TextPart<'b, 'b>> {
-        use regex::{ Regex, Match, Captures };
-        use std::sync::{ Arc, Mutex, OnceLock };
+        use regex::{ Regex, Captures };
+        use std::sync::OnceLock;
         lazy_static::lazy_static! {
             static ref BOLD_REGEX: Regex = Regex::new(r"\*\*(?<content>.+?)\*\*").unwrap();
             static ref ITALIC_REGEX: Regex = Regex::new(r"\*(?<content>.+?)\*").unwrap();

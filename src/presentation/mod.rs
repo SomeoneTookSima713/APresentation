@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use opengl_graphics::GlGraphics;
 use graphics::Context;
 

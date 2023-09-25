@@ -33,7 +33,7 @@ fn main() {
 
     let mut window: PistonWindow = application.init(format!("APresentation - {}",APPLICATION_VERSION), (640,480), true, true, true, args[1].clone());
 
-    let mut fullscreen = false;
+    let mut fullscreen;
 
     while let Some(e) = window.next() {
         if let Some(args) = e.render_args() {
