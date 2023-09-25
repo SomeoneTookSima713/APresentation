@@ -358,6 +358,16 @@ impl<'de> Deserialize<'de> for DocumentFonts {
     }
 }
 
+use once_cell::sync::Lazy;
+const RENDERABLE_FUNCS: Lazy<Vec<Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>>> = Lazy::new(|| {
+    vec![
+        Box::new(|d: &HashMap<String, JSONValue>| ColoredRect::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>,
+        Box::new(|d: &HashMap<String, JSONValue>| RoundedRect::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>,
+        Box::new(|d: &HashMap<String, JSONValue>| Text::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>,
+        Box::new(|d: &HashMap<String, JSONValue>| Image::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>
+    ]
+});
+
 #[derive(Debug)]
 pub struct SlideData {
     pub background: Box<dyn Renderable>,
@@ -365,15 +375,6 @@ pub struct SlideData {
 }
 impl SlideData {
     pub fn from_json_data<E: serde::de::Error>(data: &HashMap<String, JSONValue>) -> Result<SlideData, E> {
-        use once_cell::sync::Lazy;
-        const RENDERABLE_FUNCS: Lazy<Vec<Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>>> = Lazy::new(|| {
-            vec![
-                Box::new(|d: &HashMap<String, JSONValue>| ColoredRect::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>,
-                Box::new(|d: &HashMap<String, JSONValue>| RoundedRect::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>,
-                Box::new(|d: &HashMap<String, JSONValue>| Text::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>,
-                Box::new(|d: &HashMap<String, JSONValue>| Image::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>
-            ]
-        });
         let err_bg_invalid = ||serde::de::Error::custom("field \"background\" is invalid");
 
         let background: Box<dyn Renderable>;
