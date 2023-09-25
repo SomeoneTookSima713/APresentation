@@ -21,3 +21,4 @@ freetype-rs = "0.32.0"
 meval = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 deser-hjson = "2.1.0"
+winit = "0.28.1"

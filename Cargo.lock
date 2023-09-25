@@ -18,6 +18,7 @@ dependencies = [
  "pistoncore-glutin_window",
  "regex",
  "serde",
+ "winit",
 ]
 
 [[package]]

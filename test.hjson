@@ -7,11 +7,23 @@ slides: [
         background: [1.0, 0.8, 0.6],
         content: [
             {
-                type: Image,
+                type: "Image",
                 pos: "50%;50%",
                 size: "50%;50%",
                 alignment: "MID_CENTERED",
                 path: "D:\\Daten\\Simon Schneider\\Bilder\\IMG_20221227_203322.jpg"
+            },
+            {
+                type: "Text",
+                pos: "10%;10%",
+                size: "(4+sin(t))%",
+                width: "w",
+                alignment: "TOP_LEFT",
+                color: "0;0;0;1",
+                font: "Rubik",
+                text: [
+                    "This is a test"
+                ]
             }
         ]
     },
@@ -19,7 +31,7 @@ slides: [
         background: [0.8, 1.0, 0.6],
         content: [
             {
-                type: Image,
+                type: "Image",
                 pos: "40%;40%",
                 size: "50%;50%",
                 alignment: "MID_CENTERED",

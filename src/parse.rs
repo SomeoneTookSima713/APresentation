@@ -39,7 +39,7 @@ impl<'de, K: Deserialize<'de> + Hash + Eq, V: Deserialize<'de>> Visitor<'de> for
 /// Any value contained in a JSON-document.
 /// 
 /// Also acts as a [`Visitor`] for itself; just use [`JSONValue::Null`] whenever you need one.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum JSONValue {
     Null,
     Bool(bool),
@@ -326,6 +326,37 @@ impl<'de> Deserialize<'de> for Document {
     }
 }
 
+#[derive(Debug)]
+pub struct DocumentFonts(pub HashMap<String, (String, String)>);
+impl<'de> Deserialize<'de> for DocumentFonts {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de> {
+        let err = |a| Err(serde::de::Error::custom(a));
+        let json_parsed: JSONValue = deserializer.deserialize_map(JSONValue::Null)?;
+        match json_parsed {
+            JSONValue::Object(map) => {
+                let fonts;
+                match map.get("fonts").ok_or(serde::de::Error::custom("required field \"fonts\" is missing"))? {
+                    JSONValue::Object(fonts_json) => {
+                        fonts = fonts_json.iter()
+                            .map(|(key, value)| (key.clone(), match value {
+                                JSONValue::Array(arr)=>(
+                                    <JSONValue as TryInto<String>>::try_into(arr.get(0).ok_or::<deser_hjson::Error>(serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap().clone()).map_err::<deser_hjson::Error, _>(|_|serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap(),
+                                    <JSONValue as TryInto<String>>::try_into(arr.get(1).ok_or::<deser_hjson::Error>(serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap().clone()).map_err::<deser_hjson::Error, _>(|_|serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap()
+                                ),
+                                _=>("".to_owned(),"".to_owned()) }))
+                            .filter(|(key,(val1,val2))| if val1.len()>0 && val2.len()>0 {true} else {println!("WARN: Font {} has invalid paths",key);false}).collect();
+                    },
+                    _ => return err("field \"fonts\" needs to be a dictionary")
+                }
+
+                Ok(DocumentFonts(fonts))
+            },
+            _ => err("base object isn't a map")
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct SlideData {
@@ -386,8 +417,16 @@ impl SlideData {
                     let m = renderable_json.clone().try_into().map_err(|_|serde::de::Error::custom("array \"content\" has invalid contents"))?;
                     let mut result: Result<Box<dyn Renderable>, String> = Err("".to_owned());
 
+                    let mut errors: Vec<String> = Vec::new();
+
                     for func in RENDERABLE_FUNCS.iter() {
-                        result = result.or((func)(&m));
+                        result = match result {
+                            Ok(r) => Ok(r),
+                            Err(e) => {
+                                errors.push(e);
+                                (func)(&m)
+                            }
+                        };
                     }
 
                     let values_result: Result<&JSONValue, E> = get_value_alternates(&m, vec!["z_index","z-index","z"]);
@@ -396,10 +435,10 @@ impl SlideData {
                     
                     match content.get_mut(&(z_index as u8)) {
                         Some(list) => {
-                            list.push(result.map_err(|_|serde::de::Error::custom("invalid contents of renderable object"))?);
+                            list.push(result.map_err(|_|serde::de::Error::custom(format!("invalid contents of renderable object ({:?})",errors)))?);
                         },
                         None => {
-                            content.insert(z_index as u8, vec![result.map_err(|_|serde::de::Error::custom("invalid contents of renderable object"))?]);
+                            content.insert(z_index as u8, vec![result.map_err(|_|serde::de::Error::custom(format!("invalid contents of renderable object ({:?})",errors)))?]);
                         }
                     }
                 }
@@ -431,28 +470,14 @@ trait FromJson {
     where Self: Sized;
 }
 
-impl<'de, 'a> Deserialize<'de> for ColoredRect<'a> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de> {
-        let hashmap: HashMap<String, String> = deserializer.deserialize_map(HashMapVisitor(PhantomData))?;
-        match hashmap.get("type").ok_or(serde::de::Error::custom("type of renderable object not specified"))?.as_str() {
-            "ColoredRect" | "coloredrect" | "colored_rect" => {},
-            _ => { return Err(serde::de::Error::custom("wrong type")) }
-        }
-        Ok(
-            ColoredRect::new(
-                get_value_alternates(&hashmap, vec!["pos", "position"])?,
-                get_value_alternates(&hashmap, vec!["size"])?,
-                get_value_alternates(&hashmap, vec!["col", "color"])?,
-                get_value_alternates(&hashmap, vec!["align", "alignment"])?)
-        )
-    }
-}
-
 impl<'a> FromJson for ColoredRect<'a> {
     fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
     where Self: Sized {
+        match hashmap.get("type").ok_or(serde::de::Error::custom("no type given"))?.eq(&JSONValue::String("ColoredRect".to_owned())) {
+            true => {},
+            false => return Err(serde::de::Error::custom("wrong type"))
+        }
+
         let pos: String;
         match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
             Ok(p) => pos = p,
@@ -483,29 +508,14 @@ impl<'a> FromJson for ColoredRect<'a> {
     }
 }
 
-impl<'de, 'a> Deserialize<'de> for RoundedRect<'a> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de> {
-        let hashmap: HashMap<String, String> = deserializer.deserialize_map(HashMapVisitor(PhantomData))?;
-        match hashmap.get("type").ok_or(serde::de::Error::custom("type of renderable object not specified"))?.as_str() {
-            "RoundedRect" | "roundedrect" | "rounded_rect" => {},
-            _ => { return Err(serde::de::Error::custom("wrong type")) }
-        }
-        Ok(
-            RoundedRect::new(
-                get_value_alternates(&hashmap, vec!["pos", "position"])?,
-                get_value_alternates(&hashmap, vec!["size"])?,
-                get_value_alternates(&hashmap, vec!["col", "color"])?,
-                get_value_alternates(&hashmap, vec!["corners", "corner_rounding", "rounding", "radius", "corner_radius"])?,
-                get_value_alternates(&hashmap, vec!["align", "alignment"])?)
-        )
-    }
-}
-
 impl<'a> FromJson for RoundedRect<'a> {
     fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
     where Self: Sized {
+        match hashmap.get("type").ok_or(serde::de::Error::custom("no type given"))?.eq(&JSONValue::String("RoundedRect".to_owned())) {
+            true => {},
+            false => return Err(serde::de::Error::custom("wrong type"))
+        }
+
         let pos: String;
         match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
             Ok(p) => pos = p,
@@ -542,32 +552,14 @@ impl<'a> FromJson for RoundedRect<'a> {
     }
 }
 
-impl<'de, 'a> Deserialize<'de> for Text<'a> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de> {
-        let hashmap: HashMap<String, String> = deserializer.deserialize_map(HashMapVisitor(PhantomData))?;
-        match hashmap.get("type").ok_or(serde::de::Error::custom("type of renderable object not specified"))?.as_str() {
-            "Text" | "text" => {},
-            _ => { return Err(serde::de::Error::custom("wrong type")) }
-        }
-        Ok(
-            Text::new(
-                get_value_alternates(&hashmap, vec!["pos", "position"])?,
-                deser_hjson::from_str::<Vec<String>>(get_value_alternates(&hashmap, vec!["text"])?.as_str()).map_err(|e| serde::de::Error::custom(e))?,
-                get_value_alternates(&hashmap, vec!["width", "wrapping_width"])?,
-                get_value_alternates(&hashmap, vec!["size", "height", "text_size", "text_height"])?,
-                get_value_alternates(&hashmap, vec!["align", "alignment"])?,
-                get_value_alternates(&hashmap, vec!["col", "color"])?,
-                get_value_alternates(&hashmap, vec!["font", "base_font"])?.clone(),
-                &*crate::app::FONTS.get().ok_or(serde::de::Error::custom("error getting font-list"))?)
-        )
-    }
-}
-
 impl<'a> FromJson for Text<'a> {
     fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
     where Self: Sized {
+        match hashmap.get("type").ok_or(serde::de::Error::custom("no type given"))?.eq(&JSONValue::String("Text".to_owned())) {
+            true => {},
+            false => return Err(serde::de::Error::custom("wrong type"))
+        }
+
         let pos: String;
         match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
             Ok(p) => pos = p,
@@ -624,28 +616,14 @@ impl<'a> FromJson for Text<'a> {
     }
 }
 
-impl<'de, 'a> Deserialize<'de> for Image<'a> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de> {
-        let hashmap: HashMap<String, String> = deserializer.deserialize_map(HashMapVisitor(PhantomData))?;
-        match hashmap.get("type").ok_or(serde::de::Error::custom("type of renderable object not specified"))?.as_str() {
-            "Image" | "image" => {},
-            _ => { return Err(serde::de::Error::custom("wrong type")) }
-        }
-        Ok(
-            Image::new(
-                get_value_alternates(&hashmap, vec!["path", "file", "file_path"])?,
-                get_value_alternates(&hashmap, vec!["pos", "position"])?,
-                get_value_alternates(&hashmap, vec!["size"])?,
-                get_value_alternates(&hashmap, vec!["align", "alignment"])?)
-        )
-    }
-}
-
 impl<'a> FromJson for Image<'a> {
     fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
     where Self: Sized {
+        match hashmap.get("type").ok_or(serde::de::Error::custom("no type given"))?.eq(&JSONValue::String("Image".to_owned())) {
+            true => {},
+            false => return Err(serde::de::Error::custom("wrong type"))
+        }
+
         let pos: String;
         match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
             Ok(p) => pos = p,

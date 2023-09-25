@@ -176,7 +176,7 @@ impl<'a, const N: usize> TryFrom<Vec<ResolutionDependentExpr<'a>>> for ExprVecto
     type Error = String;
 
     fn try_from(value: Vec<ResolutionDependentExpr<'a>>) -> Result<Self, Self::Error> {
-        let list = value.try_into().map_err(|_| format!("amount of given Expressions doesn't match the required amount of {}", N))?;
+        let list = value.try_into().map_err(|v| format!("amount of given Expressions doesn't match the required amount of {} ({:?})", N, v))?;
         Ok(ExprVector { list })
     }
 }

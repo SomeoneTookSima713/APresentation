@@ -19,6 +19,8 @@ mod parse;
 
 mod presentation;
 
+const APPLICATION_VERSION: &'static str = "0.1.0";
+
 fn main() {
     let args = env::args().collect::<Vec<String>>();
 
@@ -29,7 +31,9 @@ fn main() {
 
     let mut application = app::Application::create(OpenGL::V3_2);
 
-    let mut window: PistonWindow = application.init("Test", (640,480), true, true, true, args[1].clone());
+    let mut window: PistonWindow = application.init(format!("APresentation - {}",APPLICATION_VERSION), (640,480), true, true, true, args[1].clone());
+
+    let mut fullscreen = false;
 
     while let Some(e) = window.next() {
         if let Some(args) = e.render_args() {
@@ -41,7 +45,11 @@ fn main() {
         }
         
         if let Some(args) = e.button_args() {
-            application.input(&args);
+            fullscreen = application.input(&args);
+
+            if fullscreen {
+                window.window.window.set_fullscreen(match window.window.window.fullscreen().is_none() { true => Some(winit::window::Fullscreen::Borderless(None)), false => None });
+            }
         }
     }
 }

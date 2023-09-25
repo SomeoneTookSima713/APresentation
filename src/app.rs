@@ -23,14 +23,15 @@ pub struct AppData {
     time: f64,
     timeint: u32,
     frames: u32,
-    last_press: (bool, bool)
+    last_press: (bool, bool, bool)
     // font: super::render::font::Font
 }
 impl AppData {
     #[allow(unused_variables)]
     pub fn create(app: &Application, filepath: String) -> AppData {
         // Testing if my parsing logic actually works
-        let document: crate::parse::Document = deser_hjson::from_str(std::fs::read_to_string(filepath).unwrap().as_str()).unwrap();
+        let filecontents: String = std::fs::read_to_string(filepath).unwrap();
+        let document_fonts: crate::parse::DocumentFonts = deser_hjson::from_str(filecontents.as_str()).unwrap();
 
         FONTS.set({
             let mut map = HashMap::new();
@@ -44,12 +45,14 @@ impl AppData {
 
             map.insert("Default".to_owned(), RefCell::new(presentation::TextFont { base_font: font.clone(), bold_font: font.clone() }));
 
-            for (name, path) in document.fonts {
+            for (name, path) in document_fonts.0 {
                 map.insert(name, RefCell::new(presentation::renderable::TextFont::new(app, path.0, path.1)));
             }
 
             AssumeThreadSafe(map)
         }).ok().expect("error initializing fonts");
+
+        let document: crate::parse::Document = deser_hjson::from_str(filecontents.as_str()).unwrap();
 
         let mut presentation = presentation::Presentation::new();
 
@@ -75,7 +78,7 @@ impl AppData {
             time: 0.0,
             timeint: 0,
             frames: 0,
-            last_press: (false, false)
+            last_press: (false, false, false)
             // font: super::render::font::Font::new(app, "assets/Rubik-Regular.ttf", 0).unwrap()
         }
     }
@@ -129,24 +132,33 @@ impl Application {
         }
     }
 
-    pub fn input(&mut self, args: &ButtonArgs) {
+    pub fn input(&mut self, args: &ButtonArgs) -> bool {
         match (args.button, args.state, self.data.last_press) {
-            (Button::Keyboard(Key::A | Key::Left), ButtonState::Press, (false, _)) => {
+            (Button::Keyboard(Key::A | Key::Left), ButtonState::Press, (false, _, _)) => {
                 self.data.presentation.previous_slide();
                 self.data.last_press.0 = true;
             },
-            (Button::Keyboard(Key::A | Key::Left), ButtonState::Release, (true, _)) => {
+            (Button::Keyboard(Key::A | Key::Left), ButtonState::Release, (true, _, _)) => {
                 self.data.last_press.0 = false;
             },
 
-            (Button::Keyboard(Key::D | Key::Right), ButtonState::Press, (_, false)) => {
+            (Button::Keyboard(Key::D | Key::Right), ButtonState::Press, (_, false, _)) => {
                 self.data.presentation.next_slide();
                 self.data.last_press.1 = true;
             },
-            (Button::Keyboard(Key::D | Key::Right), ButtonState::Release, (_, true)) => {
+            (Button::Keyboard(Key::D | Key::Right), ButtonState::Release, (_, true, _)) => {
                 self.data.last_press.1 = false;
+            },
+            (Button::Keyboard(Key::F11), ButtonState::Press, (_, _, false)) => {
+                self.data.last_press.2 = true;
+                return true
+            },
+            (Button::Keyboard(Key::F11), ButtonState::Release, (_, _, true)) => {
+                self.data.last_press.2 = false;
             },
             _ => {}
         }
+
+        false
     }
 }
