@@ -1,3 +1,4 @@
 /target
 /vendor
 /.cargo/config.toml
+/.vscode
