@@ -23,5 +23,6 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v3
       with:
-        name: build
-        path: target/debug/a_presentation.exe
+        name: build-artifacts
+        path: |
+          target
