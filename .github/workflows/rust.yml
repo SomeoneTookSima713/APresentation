@@ -37,3 +37,6 @@ jobs:
           !target/**/build
           !target/**/deps
           !target/**/incremental
+          !target/**/**/build
+          !target/**/**/deps
+          !target/**/**/incremental
