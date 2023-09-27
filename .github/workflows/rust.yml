@@ -37,6 +37,8 @@ jobs:
           !target/**/build
           !target/**/deps
           !target/**/incremental
+          !target/**/.fingerprint
           !target/**/**/build
           !target/**/**/deps
           !target/**/**/incremental
+          !target/**/**/.fingerprint
