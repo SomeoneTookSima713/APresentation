@@ -16,13 +16,24 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+    - name: Add Windows target
+      run: rustup target add x86_64-pc-windows-gnu
+    - name: Add Linux target
+      run: rustup target add x86_64-unknown-linux-gnu
+    - name: Build for Linux
+      run: cargo build --verbose --target x86_64-unknown-linux-gnu
+    - name: Build for Windows
+      run: cargo build --verbose --target x86_64-pc-windows-gnu
+    - name: Run tests for Linux
+      run: cargo test --verbose --target x86_64-unknown-linux-gnu
+    - name: Run tests for Windows
+      run: cargo test --verbose --target x86_64-pc-windows-gnu
     - name: Upload Artifacts
       uses: actions/upload-artifact@v3
       with:
         name: build-artifacts
         path: |
           target
+          !target/**/build
+          !target/**/deps
+          !target/**/incremental
