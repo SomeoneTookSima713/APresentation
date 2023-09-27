@@ -5,6 +5,23 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde::de::Visitor;
 
+use super::Parser;
+
+pub struct JSONParser;
+impl Parser for JSONParser {
+    type FullResult = Document;
+    type FontResult = DocumentFonts;
+    type Error = deser_hjson::Error;
+
+    fn parse<'a>(&mut self, contents: &'a str) -> Result<Document, deser_hjson::Error> {
+        deser_hjson::from_str(contents)
+    }
+
+    fn parse_fonts<'a>(&mut self, contents: &'a str) -> Result<Self::FontResult, Self::Error> {
+        deser_hjson::from_str(contents)
+    }
+}
+
 use std::marker::PhantomData;
 pub struct HashMapVisitor<K, V>(PhantomData<(K,V)>);
 

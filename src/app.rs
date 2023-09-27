@@ -29,9 +29,10 @@ pub struct AppData {
 impl AppData {
     #[allow(unused_variables)]
     pub fn create(app: &Application, filepath: String) -> AppData {
-        // Testing if my parsing logic actually works
+        use crate::parse::{ Parser, JSONParser };
+
         let filecontents: String = std::fs::read_to_string(filepath).unwrap();
-        let document_fonts: crate::parse::DocumentFonts = deser_hjson::from_str(filecontents.as_str()).unwrap();
+        let document_fonts: crate::parse::json::DocumentFonts = JSONParser.parse_fonts(filecontents.as_str()).unwrap();
 
         FONTS.set({
             let mut map = HashMap::new();
@@ -52,7 +53,7 @@ impl AppData {
             AssumeThreadSafe(map)
         }).ok().expect("error initializing fonts");
 
-        let document: crate::parse::Document = deser_hjson::from_str(filecontents.as_str()).unwrap();
+        let document: crate::parse::json::Document = JSONParser.parse(filecontents.as_str()).unwrap();
 
         let mut presentation = presentation::Presentation::new();
 
