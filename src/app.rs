@@ -37,14 +37,17 @@ impl AppData {
         FONTS.set({
             let mut map = HashMap::new();
 
-            let bytes = include_bytes!("OpenSans.ttf");
-            let vec: Vec<u8> = bytes.into_iter().map(|r|*r).collect();
+            #[cfg(default_font)]
+            {
+                let bytes = include_bytes!("OpenSans.ttf");
+                let vec: Vec<u8> = bytes.into_iter().map(|r|*r).collect();
 
-            let face = app.freetype_instance.new_memory_face(std::rc::Rc::new(vec), 0).unwrap();
+                let face = app.freetype_instance.new_memory_face(std::rc::Rc::new(vec), 0).unwrap();
 
-            let font = crate::render::font::Font { base: face };
+                let font = crate::render::font::Font { base: face };
 
-            map.insert("Default".to_owned(), RefCell::new(presentation::TextFont { base_font: font.clone(), bold_font: font.clone() }));
+                map.insert("Default".to_owned(), RefCell::new(presentation::TextFont { base_font: font.clone(), bold_font: font.clone() }));
+            }
 
             for (name, path) in document_fonts.0 {
                 map.insert(name, RefCell::new(presentation::renderable::TextFont::new(app, path.0, path.1)));
@@ -67,10 +70,13 @@ impl AppData {
             presentation.add_slide(slide);
         }
 
-        let mut last_slide = presentation::Slide::new(Box::new(presentation::ColoredRect::new("0;0", "w;h", "0;0;0;1", "TOP_LEFT")) as Box<dyn presentation::Renderable>);
-        last_slide.add(presentation::Text::new("0;4%", vec!["End of presentation"], "w", "4%", "TOP_LEFT", "1;1;1;1", "Default".to_owned(), &*FONTS.get().unwrap()), 0);
+        #[cfg(default_font)]
+        {
+            let mut last_slide = presentation::Slide::new(Box::new(presentation::ColoredRect::new("0;0", "w;h", "0;0;0;1", "TOP_LEFT")) as Box<dyn presentation::Renderable>);
+            last_slide.add(presentation::Text::new("0;4%", vec!["End of presentation"], "w", "4%", "TOP_LEFT", "1;1;1;1", "Default".to_owned(), &*FONTS.get().unwrap()), 0);
 
-        presentation.add_slide(last_slide);
+            presentation.add_slide(last_slide);
+        }
 
         // println!("{:?}", document);
 

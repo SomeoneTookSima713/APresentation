@@ -8,6 +8,9 @@ authors = [
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default_font = []
+
 [dependencies]
 lazy_static = "1.4"
 regex = "1"
@@ -22,3 +25,8 @@ meval = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 deser-hjson = "2.1.0"
 winit = "0.28.1"
+
+[build-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+deser-hjson = "2.1.0"
+reqwest = { version = "0.11", features = ["blocking"] }

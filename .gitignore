@@ -3,3 +3,6 @@
 /.cargo/config.toml
 /Cargo.lock
 /.vscode
+/just.exe
+/just
+/src/OpenSans.ttf

@@ -1,0 +1,8 @@
+{
+    // This, along with the binary type (either 'release' or 'debug') sets the
+    // APPLICATION_VERSION constant in main.rs
+    app_version: [0, 1, 0],
+    // Downloads and includes Open Sans as a default font into the binary. If
+    // not set, you'll be forced to specify a custom font in every presentation.
+    include_default_font: true
+}

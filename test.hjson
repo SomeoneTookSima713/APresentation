@@ -14,10 +14,6 @@
         /*
         The font OpenSans is included by default (use it by setting the 'font'-
         field of Text-objects to "Default")
-        
-        NOTE: This default font can be turned off during compilation, so depen-
-        ding on your distribution of this software, this font may not be
-        included
         */
     },
     slides: [

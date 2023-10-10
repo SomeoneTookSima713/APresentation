@@ -20,7 +20,8 @@ mod parse;
 
 mod presentation;
 
-const APPLICATION_VERSION: &'static str = "0.1.0";
+/// The version of the application
+const APPLICATION_VERSION: &'static str = include_str!("version");
 
 fn run_viewer(args: Vec<String>) -> Result<(), Box<dyn Debug>> {
     let mut application = app::Application::create(OpenGL::V3_2);
