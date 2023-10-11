@@ -28,6 +28,19 @@
             // code).
             content: [
                 {
+                    type: "Text",
+                    pos: "0;0",
+                    width: "100%",
+                    height: "24*h/720",
+                    col: "0;0;0;1",
+                    align: "TOP_LEFT",
+                    font: "Default",
+                    text: [
+                        "This is a test.",
+                        "If everything works, this should be a second line!"
+                    ]
+                },
+                {
                     // This is the type of the Renderable-object. It defines
                     // what properties it has and how it's rendered.
                     type: "RoundedRect",

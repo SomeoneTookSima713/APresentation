@@ -4,5 +4,7 @@
     app_version: [0, 1, 0],
     // Downloads and includes Open Sans as a default font into the binary. If
     // not set, you'll be forced to specify a custom font in every presentation.
+    // This also disables the automatic 'End of presentation' slide appended
+    // onto every presentation, as it relies on this default font.
     include_default_font: true
 }

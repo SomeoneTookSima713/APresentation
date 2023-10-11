@@ -281,6 +281,9 @@ impl<'a> Text<'a> {
     pub fn new<PosStr, TextStr, WidthStr, SizeStr, AlignStr, ColStr>(pos: PosStr, text: Vec<TextStr>, wrapping_width: WidthStr, size: SizeStr, alignment: AlignStr, color: ColStr, base_font: String, font_list: &'static HashMap<String, RefCell<TextFont>>) -> Text<'a>
     where PosStr: Into<String>, TextStr: Into<String>, WidthStr: Into<String>, SizeStr: Into<String>, AlignStr: Into<String>, ColStr: Into<String> {
         let mut text_parts = Vec::new();
+        
+        // Small hack/bodge: The text renders one row to high for some reason, so I just added a newline at the beginning
+        text_parts.push(TextPart::NewLine);
 
         let size_expr = util::res_dependent_expr(<SizeStr as Into<String>>::into(size), &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased);
 
