@@ -31,7 +31,7 @@
                     type: "Text",
                     pos: "0;0",
                     width: "100%",
-                    height: "24*h/720",
+                    height: "(24 + 6*sin(t))*h/720",
                     col: "0;0;0;1",
                     align: "TOP_LEFT",
                     font: "Default",

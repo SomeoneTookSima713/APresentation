@@ -332,8 +332,8 @@ impl<'a> Renderable for Text<'a> {
                     if curr_max_height<part_size { curr_max_height = part_size }
                     let part_width;
                     match bold {
-                        false => { part_width = font.borrow_mut().base_font.size(text, part_size as u32).unwrap().0 },
-                        true => { part_width = font.borrow_mut().bold_font.size(text, part_size as u32).unwrap().0 }
+                        false => { part_width = font.borrow_mut().base_font.size(text, part_size).0 },
+                        true => { part_width = font.borrow_mut().bold_font.size(text, part_size).0 }
                     }
                     if curr_width+part_width>max_width {
                         height += curr_max_height;
@@ -371,7 +371,7 @@ impl<'a> Renderable for Text<'a> {
                         false => font_instance = &mut font_borrow.base_font
                     }
 
-                    let part_size = font_instance.size(text, part_font_size as u32).unwrap();
+                    let part_size = font_instance.size(text, part_font_size);
 
                     if current_pos.0 + part_size.0 > max_width {
                         current_pos.0 = starting_pos.0;
@@ -381,7 +381,7 @@ impl<'a> Renderable for Text<'a> {
 
                     let ctx = context.trans(current_pos.0, current_pos.1);
 
-                    font_instance.draw(text, part_font_size as u32, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl).unwrap();
+                    font_instance.draw(text, part_font_size, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl);
 
                     current_pos.0 += part_size.0;
                 }

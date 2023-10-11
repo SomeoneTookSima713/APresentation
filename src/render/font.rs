@@ -6,16 +6,21 @@ use graphics::{Context, Graphics, ImageSize};
 use crate::app::Application;
 use crate::util::{ DefaultingOption };
 
+pub const FONT_SCALE: f32 = 40.0;
+
 #[derive(Clone)]
 pub struct Font {
-    pub base: freetype::Face
+    pub base: fontdue::Font
 }
 
 #[allow(dead_code)]
 impl Font {
     pub fn new<P: AsRef<Path>, F: Into<DefaultingOption<isize>>>(app: &Application, path: P, face_index: F) -> Option<Font> {
         let face_index_option: DefaultingOption<isize> = face_index.into();
-        let face = app.freetype_instance.new_face(path.as_ref(), face_index_option.consume(0));
+
+        let bytes = std::fs::read(path.as_ref()).ok()?;
+
+        let face = fontdue::Font::from_bytes(bytes, fontdue::FontSettings { collection_index: face_index_option.consume(0) as u32, scale: FONT_SCALE });
 
         match face {
             Ok(v) => Some(Font { base: v }),
@@ -23,28 +28,38 @@ impl Font {
         }
     }
 
-    fn glyphs(&self, text: &str) -> Vec<(Texture, [f64; 2])> {
-        let mut x = 10;
-        let mut y = 0;
+    fn glyphs(&self, text: &str, size: f32) -> Vec<(Texture, [f64; 2])> {
+        let mut x = 10.0;
+        let mut y = 0.0;
+        let height = self.base.rasterize('█', size).0.height as f32;
         let mut res = vec![];
         for ch in text.chars() {
-            self.base.load_char(ch as usize, ft::face::LoadFlag::RENDER).unwrap();
-            let g = self.base.glyph();
-    
-            let bitmap = g.bitmap();
+            let g = self.base.rasterize_subpixel(ch, size);
+
+            let metrics_smaller = self.base.metrics(ch, size.floor());
+            let metrics_bigger = self.base.metrics(ch, size.ceil());
+            let xmin = metrics_smaller.xmin as f32 + (metrics_bigger.xmin - metrics_smaller.xmin) as f32*size.fract();
+            let ymin = metrics_smaller.ymin as f32 + (metrics_bigger.ymin - metrics_smaller.ymin) as f32*size.fract();
+            
+            let mut bitmap = Vec::new();
+            for col in g.1.chunks_exact(3) {
+                let (r,g,b) = (col[0],col[1],col[2]);
+                bitmap.push(((r as f64 + g as f64 + b as f64)/3.0) as u8);
+            }
             let texture = Texture::from_memory_alpha(
-                bitmap.buffer(),
-                bitmap.width() as u32,
-                bitmap.rows() as u32,
+                bitmap.as_slice(),
+                g.0.width as u32,
+                g.0.height as u32,
                 &TextureSettings::new()
             ).unwrap();
-            res.push((texture, [(x + g.bitmap_left()) as f64, (y - g.bitmap_top()) as f64]));
+            res.push((texture, [(x + xmin) as f64, (y + height - g.0.height as f32 - ymin) as f64]));
     
-            x += (g.advance().x >> 6) as i32;
-            y += (g.advance().y >> 6) as i32;
+            x += g.0.advance_width;
+            y += g.0.advance_height;
         }
         res
     }
+
     fn render_text<G, T>(glyphs: &[(T, [f64; 2])], c: &Context, gl: &mut G, color: [f32;4], italic: bool, size: u32)
         where G: Graphics<Texture = T>, T: ImageSize
     {
@@ -63,24 +78,24 @@ impl Font {
         }
     }
 
-    pub fn draw<Str: Into<String>>(&mut self, text: Str, size: u32, color: (f32,f32,f32,f32), italic: bool, context: &Context, opengl_backend: &mut GlGraphics) -> Result<(), freetype::error::Error> {
+    pub fn draw<Str: Into<String>>(&mut self, text: Str, size: f64, color: (f32,f32,f32,f32), italic: bool, context: &Context, opengl_backend: &mut GlGraphics) {
+        let size = size as u32;
         let mut text_string: String = text.into();
         text_string.push(' ');
-        self.base.set_pixel_sizes(0, size)?;
+        // self.base.set_pixel_sizes(0, size)?;
         
-        let glyphs = self.glyphs(&text_string);
+        let glyphs = self.glyphs(&text_string, size as f32);
 
         Self::render_text(&glyphs, context, opengl_backend, [color.0,color.1,color.2,color.3], italic, size);
-
-        Ok(())
     }
 
-    pub fn size<Str: Into<String>>(&self, text: Str, size: u32) -> Result<(f64, f64), freetype::error::Error> {
+    pub fn size<Str: Into<String>>(&self, text: Str, size: f64) -> (f64, f64) {
+        let size = size as u32;
         let text_string: String = text.into();
         // text_string.push(' ');
-        self.base.set_pixel_sizes(0, size)?;
-        let glyphs = self.glyphs(&text_string);
+        // self.base.set_pixel_sizes(0, size)?;
+        let glyphs = self.glyphs(&text_string, size as f32);
         let size = glyphs[glyphs.len()-1].1;
-        Ok((size[0],size[1]))
+        (size[0],size[1])
     }
 }

@@ -11,7 +11,6 @@ use super::presentation;
 
 pub struct Application {
     pub opengl_version: OpenGL,
-    pub freetype_instance: ft::Library,
     pub opengl_backend: PanickingOption<GlGraphics>,
     pub data: PanickingOption<AppData>
 }
@@ -39,10 +38,9 @@ impl AppData {
 
             #[cfg(default_font)]
             {
-                let bytes = include_bytes!("OpenSans.ttf");
-                let vec: Vec<u8> = bytes.into_iter().map(|r|*r).collect();
+                let bytes = include_bytes!("OpenSans.ttf") as &[u8];
 
-                let face = app.freetype_instance.new_memory_face(std::rc::Rc::new(vec), 0).unwrap();
+                let face = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).expect("couldn't parse default font's data");
 
                 let font = crate::render::font::Font { base: face };
 
@@ -93,9 +91,7 @@ impl AppData {
 
 impl Application {
     pub fn create(opengl_version: OpenGL) -> Self {
-        let freetype_instance = freetype::Library::init().unwrap();
-
-        Application { opengl_version, freetype_instance, opengl_backend: PanickingOption::None, data: PanickingOption::None }
+        Application { opengl_version, opengl_backend: PanickingOption::None, data: PanickingOption::None }
     }
     pub fn init<Str: Into<String>>(&mut self, title: Str, resolution: (u32, u32), vsync: bool, resizable: bool, decoration: bool, filepath: String) -> PistonWindow {
         let window = piston::window::WindowSettings::new(title.into(), [resolution.0,resolution.1])
