@@ -1,24 +1,29 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::path::PathBuf;
+use std::fmt::Debug;
 
 use serde::Deserialize;
 use serde::de::Visitor;
 
-use super::Parser;
+#[allow(unused)]
+use log::{ debug as log_dbg, info as log_info, warn as log_warn, error as log_err };
+
+use super::{ Parser, SlideData };
 
 pub struct JSONParser;
 impl Parser for JSONParser {
-    type FullResult = Document;
-    type FontResult = DocumentFonts;
-    type Error = deser_hjson::Error;
 
-    fn parse<'a>(&mut self, contents: &'a str) -> Result<Document, deser_hjson::Error> {
-        deser_hjson::from_str(contents)
+    fn parse<'a>(&mut self, contents: &'a str) -> Result<Vec<SlideData>, Box<dyn Debug>> {
+        let document: Document = deser_hjson::from_str(contents).map_err(|e| Box::new(e) as Box<dyn Debug>)?;
+
+        Ok(document.0)
     }
 
-    fn parse_fonts<'a>(&mut self, contents: &'a str) -> Result<Self::FontResult, Self::Error> {
-        deser_hjson::from_str(contents)
+    fn parse_fonts<'a>(&mut self, contents: &'a str) -> Result<HashMap<String, (String, String)>, Box<dyn Debug>> {
+        let fonts: DocumentFonts = deser_hjson::from_str(contents).map_err(|e| Box::new(e) as Box<dyn Debug>)?;
+
+        Ok(fonts.0)
     }
 }
 
@@ -297,49 +302,125 @@ impl<'de> Deserialize<'de> for JSONValue {
 
 use crate::presentation::renderable::*;
 
+/// Helper struct with functions for parsing the JSON-document
 #[derive(Debug)]
-pub struct Document {
-    pub fonts: HashMap<String, (String, String)>,
-    pub slides: Vec<SlideData>
+pub struct Document(pub Vec<SlideData>);
+impl Document {
+    /// Parses the document to get a [`Vec`] of [`SlideData`]s
+    pub fn slides_from_json<E: serde::de::Error>(data: &HashMap<String, JSONValue>) -> Result<SlideData, E> {
+        // Helper function for creating a general error message for the background being invalid.
+        let err_bg_invalid = ||serde::de::Error::custom("field \"background\" is invalid");
+
+        // Alias for creating any serde error message.
+        let err = serde::de::Error::custom;
+
+        // Parse the background object
+        let background: Box<dyn Renderable>;
+        match data.get("background").ok_or(serde::de::Error::custom("required field \"background\" is missing in slide"))? {
+            // Simplest case: Just an array of RGB-values
+            JSONValue::Array(vec) => {
+                // Get the RGB-values from the array
+                //   Errors when the array is to short or when the conversion from `JSONValue` to f64
+                //   fails.
+                let r: f64 = vec.get(0).ok_or((err_bg_invalid)())?.clone().try_into().map_err(|_|(err_bg_invalid)())?;
+                let g: f64 = vec.get(1).ok_or((err_bg_invalid)())?.clone().try_into().map_err(|_|(err_bg_invalid)())?;
+                let b: f64 = vec.get(2).ok_or((err_bg_invalid)())?.clone().try_into().map_err(|_|(err_bg_invalid)())?;
+
+                // Use the RGB-values to create a colored rectangle filling the whole screen
+                background = Box::new( ColoredRect::new("0;0", "100%;100%", format!("{r};{g};{b};1"), "TOP_LEFT") ) as Box<dyn Renderable>;
+            },
+            // More complex case: Any renderable object
+            JSONValue::Object(hashmap) => {
+
+                // Tries to construct a Renderable object based on the specified type.
+                //   Errors if the specified type doesn't exist, the field is invalid or the
+                //   constructor function failed.
+                let renderable_type: String = hashmap.get("type").ok_or(err("required field \"type\" missing"))?.clone()
+                    .try_into().map_err(|_|err("field \"type\" needs to be a string"))?;
+                let result = (RENDERABLE_FUNCS.get(&renderable_type).ok_or(err("field \"type\" is invalid"))?)(hashmap);
+
+                // The error when the constructor function failed occurs here.
+                match result {
+                    Ok(b) => background = b,
+                    Err(_) => return Err((err_bg_invalid)())
+                }
+            },
+            // Last case: Any invalid JSONValue (e.g. a number or string)
+            _ => return Err((err_bg_invalid)())
+        }
+
+        // Parse all objects defined in the slide
+        let mut content: HashMap<u8, Vec<Box<dyn Renderable>>> = HashMap::new();
+        match data.get("content").ok_or(serde::de::Error::custom("required field \"content\" is missing in slide"))? {
+            JSONValue::Array(vec) => {
+                // The default for the z-index of an object
+                let z_index_default = JSONValue::Number(0.0);
+
+                for (i, renderable_json) in vec.iter().enumerate() {
+                    let map: HashMap<String, JSONValue> = renderable_json.clone().try_into().map_err(|_|serde::de::Error::custom("field \"content\" must be an array of objects"))?;
+
+                    // Tries to construct a Renderable object based on the specified type.
+                    //   Errors if the specified type doesn't exist, the field is invalid or the
+                    //   constructor function failed.
+                    let renderable_type: String = map.get("type").ok_or(err("required field \"type\" missing"))?.clone()
+                        .try_into().map_err(|_|err("field \"type\" needs to be a string"))?;
+                    let result = (RENDERABLE_FUNCS.get(&renderable_type).ok_or(err("field \"type\" is invalid"))?)(&map);
+                    let object = result.map_err(|e|err(format!("invalid contents of renderable object #{i} ({e})").leak()))?;
+
+                    // Note: The error message just says 'expected an integer' because the number
+                    //       gets casted to an integer. You can supply a float in theory though.
+                    let z_index_result: Result<&JSONValue, E> = get_value_alternates(&map, vec!["z_index","z-index","z"]);
+                    let z_index: f64 = z_index_result.unwrap_or(&z_index_default)
+                        .clone().try_into().map_err(|_|serde::de::Error::custom("invalid z-index (expected an integer)"))?;
+                    
+                    // Check in the map if a vec for the specified z-index already exists or not
+                    match content.get_mut(&(z_index as u8)) {
+                        // If it exists, just push the object to this list
+                        Some(list) => {
+                            list.push(object);
+                        },
+                        // If it doesn't exist, create one and then push the object to the list
+                        None => {
+                            content.insert(z_index as u8, vec![object]);
+                        }
+                    }
+                }
+            },
+            // Return an error if the 'content'-field isn't actually an array of objects
+            _ => return Err((err_bg_invalid)())
+        }
+
+        Ok(SlideData { background, content })
+    }
 }
 
 impl<'de> Deserialize<'de> for Document {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: serde::Deserializer<'de> {
-        let err = |a| Err(serde::de::Error::custom(a));
-        let json_parsed: JSONValue = deserializer.deserialize_map(JSONValue::Null)?;
-        match json_parsed {
-            JSONValue::Object(map) => {
-                let fonts;
-                match map.get("fonts").ok_or(serde::de::Error::custom("required field \"fonts\" is missing"))? {
-                    JSONValue::Object(fonts_json) => {
-                        fonts = fonts_json.iter()
-                            .map(|(key, value)| (key.clone(), match value {
-                                JSONValue::Array(arr)=>(
-                                    <JSONValue as TryInto<String>>::try_into(arr.get(0).ok_or::<deser_hjson::Error>(serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap().clone()).map_err::<deser_hjson::Error, _>(|_|serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap(),
-                                    <JSONValue as TryInto<String>>::try_into(arr.get(1).ok_or::<deser_hjson::Error>(serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap().clone()).map_err::<deser_hjson::Error, _>(|_|serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap()
-                                ),
-                                _=>("".to_owned(),"".to_owned()) }))
-                            .filter(|(key,(val1,val2))| if val1.len()>0 && val2.len()>0 {true} else {println!("WARN: Font {} has invalid paths",key);false}).collect();
-                    },
-                    _ => return err("field \"fonts\" needs to be a dictionary")
-                };
+        // Helper function for error creation; keeps the code lines shorter and more readable
+        let err = serde::de::Error::custom;
 
-                let mut slides = Vec::new();
-                match map.get("slides").ok_or(serde::de::Error::custom("required field \"slides\" is missing"))? {
-                    JSONValue::Array(vec) => {
-                        for obj in vec.iter() {
-                            slides.push(match obj { JSONValue::Object(hashmap)=>SlideData::from_json_data(hashmap)?, _=>return err("contents of \"slides\" array need to be objects") });
-                        }
-                    },
-                    _ => return err("field \"slides\" needs to be an array")
-                }
+        // Parse the document to a map
+        //   (JSONValue also acts as a Visitor from the 'serde'-crate for itself)
+        let map: HashMap<String, JSONValue> = deserializer.deserialize_map(JSONValue::Null)?.try_into().map_err(|_|err("base object isn't a map"))?;
 
-                Ok(Document { fonts, slides })
-            },
-            _ => err("base object isn't a map")
-        }
+
+        let slides = {
+            // Gets the 'slides'-field and checks if it's actually an array
+            let slide_array: Vec<JSONValue> = map.get("slides").ok_or(err("required field \"slides\" is missing"))?.clone()
+                    .try_into().map_err(|_|err("field \"slides\" must be an array"))?;
+            
+            // Parses the slides contained in the 'slides'-array
+            //   Errors if any item in the array isn't an object or any object couldn't get parsed
+            //   into a slide.
+            slide_array.into_iter().map(|json_val| {
+                let map: HashMap<String, JSONValue> = json_val.try_into().map_err(|_|err("contents of \"slides\" array need to be objects"))?;
+                Document::slides_from_json(&map)
+            }).collect::< Result<Vec<SlideData>, D::Error> >()?
+        };
+
+        Ok(Document(slides))
     }
 }
 
@@ -349,128 +430,56 @@ impl<'de> Deserialize<'de> for DocumentFonts {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: serde::Deserializer<'de> {
-        let err = |a| Err(serde::de::Error::custom(a));
-        let json_parsed: JSONValue = deserializer.deserialize_map(JSONValue::Null)?;
-        match json_parsed {
-            JSONValue::Object(map) => {
-                let fonts;
-                match map.get("fonts").ok_or(serde::de::Error::custom("required field \"fonts\" is missing"))? {
-                    JSONValue::Object(fonts_json) => {
-                        fonts = fonts_json.iter()
-                            .map(|(key, value)| (key.clone(), match value {
-                                JSONValue::Array(arr)=>(
-                                    <JSONValue as TryInto<String>>::try_into(arr.get(0).ok_or::<deser_hjson::Error>(serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap().clone()).map_err::<deser_hjson::Error, _>(|_|serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap(),
-                                    <JSONValue as TryInto<String>>::try_into(arr.get(1).ok_or::<deser_hjson::Error>(serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap().clone()).map_err::<deser_hjson::Error, _>(|_|serde::de::Error::custom("entry in field \"fonts\" needs to be an array of two strings")).unwrap()
-                                ),
-                                _=>("".to_owned(),"".to_owned()) }))
-                            .filter(|(key,(val1,val2))| if val1.len()>0 && val2.len()>0 {true} else {println!("WARN: Font {} has invalid paths",key);false}).collect();
-                    },
-                    _ => return err("field \"fonts\" needs to be a dictionary")
-                }
+        // Alias for more compact and more readable code
+        let err = serde::de::Error::custom;
 
-                Ok(DocumentFonts(fonts))
-            },
-            _ => err("base object isn't a map")
-        }
+        // Get the base object of the document and error if it isn't a map
+        let document: HashMap<String, JSONValue> = deserializer.deserialize_map(JSONValue::Null)?.try_into().map_err(|_|err("base object isn't a map"))?;
+
+        // Get the 'fonts'-field from the document
+        //   Errors if the 'fonts'-field isn't a dictionary containing tuples of two string paths.
+        let fonts = {
+            // Check if the 'fonts'-field is a dictionary
+            let font_dict: HashMap<String, JSONValue> = document.get("fonts").ok_or(err("required field \"fonts\" is missing"))?.clone()
+                .try_into().map_err(|_|err("field \"fonts\" needs to be a dictionary of tuples of two file paths"))?;
+            // The fonts will be stored here
+            let mut font_list: HashMap<String, (String, String)> = HashMap::new();
+
+            // Iterate over all values in the dict, then check if they're tuples of two strings
+            for (key, value) in font_dict.into_iter() {
+                let mut array: Vec<JSONValue> = value.try_into().map_err(|_|err("entry in dict \"fonts\" must be a tuple of two strings"))?;
+                if array.len()!=2 { return Err(err("entry in dict \"fonts\" must be a tuple of two strings")) }
+                let paths: (String, String) = (
+                    array.remove(0).try_into().map_err(|_|err("entry in dict \"fonts\" needs to be a tuple of two strings"))?,
+                    array.remove(0).try_into().map_err(|_|err("entry in dict \"fonts\" needs to be a tuple of two strings"))?,
+                );
+                font_list.insert(key, paths);
+            }
+
+            font_list
+        };
+
+        Ok(DocumentFonts(fonts))
     }
 }
 
 use once_cell::sync::Lazy;
-const RENDERABLE_FUNCS: Lazy<Vec<Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>>> = Lazy::new(|| {
-    vec![
-        Box::new(|d: &HashMap<String, JSONValue>| ColoredRect::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>,
-        Box::new(|d: &HashMap<String, JSONValue>| RoundedRect::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>,
-        Box::new(|d: &HashMap<String, JSONValue>| Text::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>,
-        Box::new(|d: &HashMap<String, JSONValue>| Image::from_json(d).map(|o| Box::new(o) as Box<dyn Renderable>).map_err(|e: deser_hjson::Error|format!("{e}"))) as Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>
-    ]
+type FnRenderableParse = Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>;
+/// A [`HashMap`] of functions for parsing each type of [`Renderable`].
+/// 
+/// The index defines the name of the type.
+const RENDERABLE_FUNCS: Lazy<HashMap<String, FnRenderableParse>> = Lazy::new(|| {
+    let mut map = HashMap::new();
+    map.insert("ColoredRect".to_owned(), ColoredRect::renderable_func::<deser_hjson::Error>());
+    map.insert("RoundedRect".to_owned(), RoundedRect::renderable_func::<deser_hjson::Error>());
+    map.insert("Text".to_owned(), Text::renderable_func::<deser_hjson::Error>());
+    map.insert("Image".to_owned(), Image::renderable_func::<deser_hjson::Error>());
+    map
 });
-
-#[derive(Debug)]
-pub struct SlideData {
-    pub background: Box<dyn Renderable>,
-    pub content: HashMap<u8, Vec<Box<dyn Renderable>>>
-}
-impl SlideData {
-    pub fn from_json_data<E: serde::de::Error>(data: &HashMap<String, JSONValue>) -> Result<SlideData, E> {
-        let err_bg_invalid = ||serde::de::Error::custom("field \"background\" is invalid");
-
-        let background: Box<dyn Renderable>;
-        match data.get("background").ok_or(serde::de::Error::custom("required field \"background\" is missing in slide"))? {
-            JSONValue::Array(vec) => {
-                let r: f64 = vec.get(0).ok_or((err_bg_invalid)())?.clone().try_into().map_err(|_|(err_bg_invalid)())?;
-                let g: f64 = vec.get(1).ok_or((err_bg_invalid)())?.clone().try_into().map_err(|_|(err_bg_invalid)())?;
-                let b: f64 = vec.get(2).ok_or((err_bg_invalid)())?.clone().try_into().map_err(|_|(err_bg_invalid)())?;
-
-                background = Box::new( ColoredRect::new("0;0", "100%;100%", format!("{r};{g};{b};1"), "TOP_LEFT") ) as Box<dyn Renderable>;
-            },
-            JSONValue::Object(hashmap) => {
-                let mut result: Result<Box<dyn Renderable>, String> = Err("".to_owned());
-
-                for func in RENDERABLE_FUNCS.iter() {
-                    result = result.or((func)(hashmap));
-                }
-
-                match result {
-                    Ok(b) => background = b,
-                    Err(_) => return Err((err_bg_invalid)())
-                }
-            },
-            _ => return Err((err_bg_invalid)())
-        }
-
-        let mut content: HashMap<u8, Vec<Box<dyn Renderable>>> = HashMap::new();
-
-        /*
-            let mut result: Result<Box<dyn Renderable>, String> = Err("".to_owned());
-
-            for func in RENDERABLE_FUNCS.iter() {
-                result = result.or((func)(data));
-            }
-        */
-
-        match data.get("content").ok_or(serde::de::Error::custom("required field \"content\" is missing in slide"))? {
-            JSONValue::Array(vec) => {
-                let z_index_default = JSONValue::Number(0.0);
-                for renderable_json in vec.iter() {
-                    let m = renderable_json.clone().try_into().map_err(|_|serde::de::Error::custom("array \"content\" has invalid contents"))?;
-                    let mut result: Result<Box<dyn Renderable>, String> = Err("".to_owned());
-
-                    let mut errors: Vec<String> = Vec::new();
-
-                    for func in RENDERABLE_FUNCS.iter() {
-                        result = match result {
-                            Ok(r) => Ok(r),
-                            Err(e) => {
-                                errors.push(e);
-                                (func)(&m)
-                            }
-                        };
-                    }
-
-                    let values_result: Result<&JSONValue, E> = get_value_alternates(&m, vec!["z_index","z-index","z"]);
-                    let z_index: f64 = values_result.unwrap_or(&z_index_default)
-                        .clone().try_into().map_err(|_|serde::de::Error::custom("invalid z-index"))?;
-                    
-                    match content.get_mut(&(z_index as u8)) {
-                        Some(list) => {
-                            list.push(result.map_err(|_|serde::de::Error::custom(format!("invalid contents of renderable object ({:?})",errors)))?);
-                        },
-                        None => {
-                            content.insert(z_index as u8, vec![result.map_err(|_|serde::de::Error::custom(format!("invalid contents of renderable object ({:?})",errors)))?]);
-                        }
-                    }
-                }
-            },
-            _ => return Err((err_bg_invalid)())
-        }
-
-        Ok(SlideData { background, content })
-    }
-}
 
 /// Helper function for getting a value of a [`HashMap`], allowing it to be stored in multiple alternative keys.
 /// 
-/// Returns a [`Result<&V, serde::de::Error>`] primarily for usage in implementations of the [`Deserialize`]-trait.
+/// Returns a [`Result<&V, serde::de::Error>`], primarily for usage in implementations of the [`Deserialize`] trait.
 fn get_value_alternates<K, V, Q, E>(map: &HashMap<K, V>, keys: Vec<Q>) -> Result<&V, E>
 where
     K: Hash + Eq + std::fmt::Display,
@@ -483,19 +492,33 @@ where
     val.ok_or(serde::de::Error::custom(format!("required parameter unspecified; possible keys: {:?}",keys)))
 }
 
+/// Trait for parsing JSON data into a struct.
+/// 
+/// Also contains some helper functions related to [`Renderable`]s that can be parsed from JSON.
 trait FromJson {
+    /// Parses JSON-data and into itself
     fn from_json<E: serde::de::Error>(dict: &HashMap<String, JSONValue>) -> Result<Self, E>
     where Self: Sized;
+
+    /// Returns a closure that constructs a Renderable object
+    fn renderable_func<E: serde::de::Error>() -> FnRenderableParse
+    where Self: Sized + Renderable + 'static {
+        let func = |dict: &'_ HashMap<String, JSONValue>| {
+            match Self::from_json::<E>(dict) {
+                Ok(s) => Ok(Box::new(s) as Box<dyn Renderable>),
+                Err(e) => Err(format!("{e}"))
+            }
+        };
+
+        Box::new(func) as FnRenderableParse
+    }
 }
 
 impl<'a> FromJson for ColoredRect<'a> {
     fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
     where Self: Sized {
-        match hashmap.get("type").ok_or(serde::de::Error::custom("no type given"))?.eq(&JSONValue::String("ColoredRect".to_owned())) {
-            true => {},
-            false => return Err(serde::de::Error::custom("wrong type"))
-        }
 
+        // Get the position, size, color and alignment from the JSON data
         let pos: String;
         match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
             Ok(p) => pos = p,
@@ -516,6 +539,8 @@ impl<'a> FromJson for ColoredRect<'a> {
             Ok(v) => alignment = v,
             Err(_) => return Err(serde::de::Error::custom("alignment needs to be a string"))
         }
+
+        // Create the struct
         Ok(
             ColoredRect::new(
                 pos,
@@ -529,11 +554,8 @@ impl<'a> FromJson for ColoredRect<'a> {
 impl<'a> FromJson for RoundedRect<'a> {
     fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
     where Self: Sized {
-        match hashmap.get("type").ok_or(serde::de::Error::custom("no type given"))?.eq(&JSONValue::String("RoundedRect".to_owned())) {
-            true => {},
-            false => return Err(serde::de::Error::custom("wrong type"))
-        }
 
+        // Get the position, size, color, corner rounding radius and alignment from the JSON data
         let pos: String;
         match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
             Ok(p) => pos = p,
@@ -559,6 +581,8 @@ impl<'a> FromJson for RoundedRect<'a> {
             Ok(v) => alignment = v,
             Err(_) => return Err(serde::de::Error::custom("alignment needs to be a string"))
         }
+
+        // Create the struct
         Ok(
             RoundedRect::new(
                 pos,
@@ -573,11 +597,9 @@ impl<'a> FromJson for RoundedRect<'a> {
 impl<'a> FromJson for Text<'a> {
     fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
     where Self: Sized {
-        match hashmap.get("type").ok_or(serde::de::Error::custom("no type given"))?.eq(&JSONValue::String("Text".to_owned())) {
-            true => {},
-            false => return Err(serde::de::Error::custom("wrong type"))
-        }
 
+        // Get the position, wrapping width, font size, color, font type, alignment and text array
+        // from the JSON data
         let pos: String;
         match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
             Ok(p) => pos = p,
@@ -609,7 +631,7 @@ impl<'a> FromJson for Text<'a> {
             Err(_) => return Err(serde::de::Error::custom("alignment needs to be a string"))
         }
         let mut texts: Vec<String> = Vec::new();
-        match <JSONValue as TryInto<Vec<JSONValue>>>::try_into(get_value_alternates(&hashmap, vec!["text"])?.clone()) {
+        match < JSONValue as TryInto<Vec<JSONValue>> >::try_into(get_value_alternates(&hashmap, vec!["text","texts","lines"])?.clone()) {
             Ok(v) => {
                 for val in v {
                     match val.try_into() {
@@ -620,6 +642,8 @@ impl<'a> FromJson for Text<'a> {
             },
             Err(_) => return Err(serde::de::Error::custom("text needs to be an array of strings"))
         }
+
+        // Create the struct
         Ok(
             Text::new(
                 pos,
@@ -637,11 +661,8 @@ impl<'a> FromJson for Text<'a> {
 impl<'a> FromJson for Image<'a> {
     fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
     where Self: Sized {
-        match hashmap.get("type").ok_or(serde::de::Error::custom("no type given"))?.eq(&JSONValue::String("Image".to_owned())) {
-            true => {},
-            false => return Err(serde::de::Error::custom("wrong type"))
-        }
 
+        // Get the position, size, file path and alignment from the JSON data
         let pos: String;
         match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
             Ok(p) => pos = p,
@@ -662,6 +683,8 @@ impl<'a> FromJson for Image<'a> {
             Ok(v) => alignment = v,
             Err(_) => return Err(serde::de::Error::custom("alignment needs to be a string"))
         }
+
+        // Create the struct
         Ok(
             Image::new(
                 PathBuf::try_from(path).map_err(|_| serde::de::Error::custom("invalid file path specified"))?,

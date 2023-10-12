@@ -1,11 +1,5 @@
 #![feature(const_trait_impl)]
 
-extern crate proc_macro;
-extern crate glutin_window;
-extern crate graphics;
-extern crate opengl_graphics;
-extern crate piston;
-
 use std::env;
 use std::fmt::Debug;
 use opengl_graphics::{ OpenGL };

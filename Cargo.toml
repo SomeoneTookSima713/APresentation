@@ -12,6 +12,8 @@ authors = [
 default_font = []
 
 [dependencies]
+log = "0.4"
+pretty_env_logger = "0.5"
 lazy_static = "1.4"
 anyhow = "1.0"
 regex = "1"

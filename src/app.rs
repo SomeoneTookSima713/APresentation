@@ -17,6 +17,7 @@ pub struct Application {
 
 pub static FONTS: OnceLock<AssumeThreadSafe<HashMap<String, RefCell<presentation::TextFont>>>> = OnceLock::new();
 
+/// Struct containing all the app's data.
 pub struct AppData {
     presentation: presentation::Presentation,
     time: f64,
@@ -26,13 +27,15 @@ pub struct AppData {
     // font: super::render::font::Font
 }
 impl AppData {
-    #[allow(unused_variables)]
     pub fn create(app: &Application, filepath: String) -> AppData {
-        use crate::parse::{ Parser, JSONParser };
+        use crate::parse::{ self, Parser };
 
-        let filecontents: String = std::fs::read_to_string(filepath).unwrap();
-        let document_fonts: crate::parse::json::DocumentFonts = JSONParser.parse_fonts(filecontents.as_str()).unwrap();
+        // Read the contents of the presentation file
+        let filecontents: String = std::fs::read_to_string(filepath.as_str()).unwrap();
 
+        let mut parser = parse::get_parser(filepath.as_str()).expect("No parser found for file type!");
+
+        let document_fonts = parser.parse_fonts(filecontents.as_str()).unwrap();
         FONTS.set({
             let mut map = HashMap::new();
 
@@ -47,18 +50,18 @@ impl AppData {
                 map.insert("Default".to_owned(), RefCell::new(presentation::TextFont { base_font: font.clone(), bold_font: font.clone() }));
             }
 
-            for (name, path) in document_fonts.0 {
+            for (name, path) in document_fonts {
                 map.insert(name, RefCell::new(presentation::renderable::TextFont::new(app, path.0, path.1)));
             }
 
             AssumeThreadSafe(map)
         }).ok().expect("error initializing fonts");
 
-        let document: crate::parse::json::Document = JSONParser.parse(filecontents.as_str()).unwrap();
+        let document = parser.parse(filecontents.as_str()).unwrap();
 
         let mut presentation = presentation::Presentation::new();
 
-        for slide_data in document.slides {
+        for slide_data in document {
             let mut slide = presentation::Slide::new(slide_data.background);
             for (z, content) in slide_data.content {
                 for renderable in content {
@@ -94,6 +97,9 @@ impl Application {
         Application { opengl_version, opengl_backend: PanickingOption::None, data: PanickingOption::None }
     }
     pub fn init<Str: Into<String>>(&mut self, title: Str, resolution: (u32, u32), vsync: bool, resizable: bool, decoration: bool, filepath: String) -> PistonWindow {
+        // Initialize the logging backend
+        pretty_env_logger::try_init_timed_custom_env("LOG").unwrap();
+
         let window = piston::window::WindowSettings::new(title.into(), [resolution.0,resolution.1])
             .graphics_api(self.opengl_version)
             .exit_on_esc(true)

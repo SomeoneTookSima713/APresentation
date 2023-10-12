@@ -2,7 +2,7 @@
 
 use std::ops::{ Deref, DerefMut };
 
-/// Like the [`Option`]-Enum, but it automatically dereferences and panics if it is [`None`]
+/// Like the [`Option`]-Enum, but it automatically dereferences and panics if it is [`None`].
 pub enum PanickingOption<T> {
     Some(T),
     None
@@ -31,7 +31,8 @@ impl<T> From<T> for PanickingOption<T> {
     }
 }
 
-/// Like the [`Option`]-Enum, but it implements [`From`] for the wrapped type and a helper function for getting the contained value or a default one, depending if it's `Some` or `None`
+/// Like the [`Option`]-Enum, but it implements [`From`] for the wrapped type and a helper function
+/// for getting the contained value or a default one, depending if it's `Some` or `None`
 pub enum DefaultingOption<T> {
     Some(T),
     None
@@ -80,7 +81,10 @@ impl<T> DefaultingOption<T> {
     }
 }
 
-/// Wrapper that is always [`Send`] and [`Sync`], independant of the contents.
+/// Wrapper that is always [`Send`] and [`Sync`], independent of the contents.
+/// 
+/// Should only be used in `const`s or `static`s that are only accessed on one thread, as it
+/// doesn't actually increase the thread safety of anything.
 pub struct AssumeThreadSafe<T>(pub T);
 
 unsafe impl<T> Send for AssumeThreadSafe<T> {}
