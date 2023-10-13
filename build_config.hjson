@@ -6,5 +6,7 @@
     // not set, you'll be forced to specify a custom font in every presentation.
     // This also disables the automatic 'End of presentation' slide appended
     // onto every presentation, as it relies on this default font.
-    include_default_font: true
+    include_default_font: true,
+    // Enables debugging features, like an FPS counter in the console.
+    enable_debugging_features: false,
 }

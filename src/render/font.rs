@@ -3,7 +3,6 @@ use std::path::Path;
 use opengl_graphics::{ GlGraphics, Texture, TextureSettings };
 use graphics::{Context, Graphics, ImageSize};
 
-use crate::app::Application;
 use crate::util::{ DefaultingOption };
 
 pub const FONT_SCALE: f32 = 40.0;
@@ -15,7 +14,7 @@ pub struct Font {
 
 #[allow(dead_code)]
 impl Font {
-    pub fn new<P: AsRef<Path>, F: Into<DefaultingOption<isize>>>(app: &Application, path: P, face_index: F) -> Option<Font> {
+    pub fn new<P: AsRef<Path>, F: Into<DefaultingOption<isize>>>(path: P, face_index: F) -> Option<Font> {
         let face_index_option: DefaultingOption<isize> = face_index.into();
 
         let bytes = std::fs::read(path.as_ref()).ok()?;

@@ -125,7 +125,6 @@ impl<'a> RoundedRect<'a> {
 }
 
 use crate::render::font;
-use crate::app::Application;
 
 #[derive(Clone)]
 pub struct TextFont {
@@ -134,19 +133,19 @@ pub struct TextFont {
 }
 impl TextFont {
     /// Creates a new [`TextFont`]
-    pub fn new<BaseStr, BoldStr>(app: &Application, base_font_path: BaseStr, bold_font_path: BoldStr) -> TextFont
+    pub fn new<BaseStr, BoldStr>(base_font_path: BaseStr, bold_font_path: BoldStr) -> TextFont
     where BaseStr: Into<String>, BoldStr: Into<String> {
         TextFont {
-            base_font: font::Font::new(app, <BaseStr as Into<String>>::into(base_font_path), 0).expect("invalid font path"),
-            bold_font: font::Font::new(app, <BoldStr as Into<String>>::into(bold_font_path), 0).expect("invalid font path")
+            base_font: font::Font::new(<BaseStr as Into<String>>::into(base_font_path), 0).expect("invalid font path"),
+            bold_font: font::Font::new(<BoldStr as Into<String>>::into(bold_font_path), 0).expect("invalid font path")
         }
     }
     /// Creates a new [`TextFont`] using fonts with a face index
-    pub fn new_indexed<BaseStr, BoldStr>(app: &Application, base_font_path: (BaseStr, isize), bold_font_path: (BoldStr, isize)) -> TextFont
+    pub fn new_indexed<BaseStr, BoldStr>(base_font_path: (BaseStr, isize), bold_font_path: (BoldStr, isize)) -> TextFont
     where BaseStr: Into<String>, BoldStr: Into<String> {
         TextFont {
-            base_font: font::Font::new(app, <BaseStr as Into<String>>::into(base_font_path.0), base_font_path.1).expect("invalid font path or face index"),
-            bold_font: font::Font::new(app, <BoldStr as Into<String>>::into(bold_font_path.0), bold_font_path.1).expect("invalid font path or face index")
+            base_font: font::Font::new(<BaseStr as Into<String>>::into(base_font_path.0), base_font_path.1).expect("invalid font path or face index"),
+            bold_font: font::Font::new(<BoldStr as Into<String>>::into(bold_font_path.0), bold_font_path.1).expect("invalid font path or face index")
         }
     }
 }

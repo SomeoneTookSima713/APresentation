@@ -6,8 +6,15 @@ use opengl_graphics::{ GlGraphics, OpenGL };
 use piston::{RenderArgs, UpdateArgs, ButtonArgs, Button, ButtonState, Key};
 use piston_window::PistonWindow;
 
+#[allow(unused)]
+use log::{ debug as log_dbg, info as log_info, warn as log_warn, error as log_err };
+
 use super::util::{ PanickingOption, AssumeThreadSafe };
 use super::presentation;
+
+// Gets used for automatic links in comments.
+#[allow(unused)]
+use crate::presentation::Renderable;
 
 pub struct Application {
     pub opengl_version: OpenGL,
@@ -19,26 +26,40 @@ pub static FONTS: OnceLock<AssumeThreadSafe<HashMap<String, RefCell<presentation
 
 /// Struct containing all the app's data.
 pub struct AppData {
+    /// All the data and state needed for rendering the presentation
     presentation: presentation::Presentation,
+    /// The time since the current slide was switched to.
+    /// 
+    /// Gets used for calculating the properties of [`Renderable`] objects.
     time: f64,
+    /// Gets used for measuring FPS
+    /// 
+    /// Only enabled in debug relases or with the 'debug_features' feature-flag.
+    #[cfg(any(debug_features))]
     timeint: u32,
+    /// Gets used for measuring FPS
+    /// 
+    /// Only enabled in debug relases or with the 'debug_features' feature-flag.
+    #[cfg(any(debug_features))]
     frames: u32,
+    /// Captures the state for the left/A, right/D and F11 keys.
     last_press: (bool, bool, bool)
-    // font: super::render::font::Font
 }
 impl AppData {
-    pub fn create(app: &Application, filepath: String) -> AppData {
+    pub fn create(filepath: String) -> AppData {
         use crate::parse::{ self, Parser };
 
         // Read the contents of the presentation file
         let filecontents: String = std::fs::read_to_string(filepath.as_str()).unwrap();
 
+        // Create an instance of a parser (which parser gets instantiated depends on the file extension)
         let mut parser = parse::get_parser(filepath.as_str()).expect("No parser found for file type!");
 
         let document_fonts = parser.parse_fonts(filecontents.as_str()).unwrap();
         FONTS.set({
             let mut map = HashMap::new();
 
+            // Adds the default font in case it was included into the binary at compile time.
             #[cfg(default_font)]
             {
                 let bytes = include_bytes!("OpenSans.ttf") as &[u8];
@@ -51,7 +72,7 @@ impl AppData {
             }
 
             for (name, path) in document_fonts {
-                map.insert(name, RefCell::new(presentation::renderable::TextFont::new(app, path.0, path.1)));
+                map.insert(name, RefCell::new(presentation::renderable::TextFont::new(path.0, path.1)));
             }
 
             AssumeThreadSafe(map)
@@ -71,6 +92,8 @@ impl AppData {
             presentation.add_slide(slide);
         }
 
+        // Adds an 'End of presentation' slide. This can only be done when including the default
+        // font though, as the text needs a font to render itself.
         #[cfg(default_font)]
         {
             let mut last_slide = presentation::Slide::new(Box::new(presentation::ColoredRect::new("0;0", "w;h", "0;0;0;1", "TOP_LEFT")) as Box<dyn presentation::Renderable>);
@@ -79,27 +102,31 @@ impl AppData {
             presentation.add_slide(last_slide);
         }
 
-        // println!("{:?}", document);
-
         AppData {
             presentation,
             time: 0.0,
+            #[cfg(any(debug_features))]
             timeint: 0,
+            #[cfg(any(debug_features))]
             frames: 0,
             last_press: (false, false, false)
-            // font: super::render::font::Font::new(app, "assets/Rubik-Regular.ttf", 0).unwrap()
         }
     }
 }
 
 impl Application {
+    /// Creates the application's data.
+    /// 
+    /// Needs to be initialized seperately using the `init()` function.
     pub fn create(opengl_version: OpenGL) -> Self {
         Application { opengl_version, opengl_backend: PanickingOption::None, data: PanickingOption::None }
     }
+    /// Initializes all the data and state of the application.
     pub fn init<Str: Into<String>>(&mut self, title: Str, resolution: (u32, u32), vsync: bool, resizable: bool, decoration: bool, filepath: String) -> PistonWindow {
         // Initialize the logging backend
         pretty_env_logger::try_init_timed_custom_env("LOG").unwrap();
 
+        // Create the window
         let window = piston::window::WindowSettings::new(title.into(), [resolution.0,resolution.1])
             .graphics_api(self.opengl_version)
             .exit_on_esc(true)
@@ -108,43 +135,54 @@ impl Application {
             .decorated(decoration)
             .build()
             .unwrap();
+        // Create the OpenGL context
         self.opengl_backend = PanickingOption::Some(GlGraphics::new(self.opengl_version));
 
-        self.data = PanickingOption::Some(AppData::create(&self, filepath));
+        // Create the application's data
+        self.data = PanickingOption::Some(AppData::create(filepath));
 
         window
     }
 
+    /// Renders the application
     pub fn render(&mut self, args: &RenderArgs) {
+        // Increase the 'frames' counter if debugging
+        //   Gets used for measuring FPS.
+        #[cfg(any(debug_features))]
+        {
+            self.data.frames += 1;
+        }
 
-        // const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
-
-        self.data.frames += 1;
-
+        // Draw the presentation
         self.opengl_backend.draw(args.viewport(), |c, gl| {
-            // graphics::clear(GREEN, gl);
+            // We need to set a local variable here to copy the value, because we already mutably
+            // borrowed 'self' in the call above and would immutably borrow it by directly passing
+            // the value into the function call below, which we aren't allowed to do.
             let time = self.data.time;
 
             self.data.presentation.render(time, c, gl);
-            // println!("{time}");
-            // self.data.font.draw("Hello World!", 48, (0.0,0.0,0.0,1.0), true, &c.trans(4.0, 52.0), gl).unwrap();
         });
     }
 
+    /// Updates the application.
+    /// 
+    /// Currently only used for updating time. (and measuring FPS if debugging is enabled)
     pub fn update(&mut self, args: &UpdateArgs) {
-        // println!("FPS: {}",1.0/args.dt);
         self.data.time += args.dt;
+        #[cfg(any(debug_features))]
         if self.data.time>= self.data.timeint as f64 + 1.0 {
             self.data.timeint += 1;
-            // println!("FPS: {} / {}", self.data.frames, 1.0/args.dt);
+            log_dbg!("FPS: {} / {}", self.data.frames, 1.0/args.dt);
             self.data.frames = 0;
         }
     }
 
+    /// Checks for input and updates the applications state accordingly.
     pub fn input(&mut self, args: &ButtonArgs) -> bool {
         match (args.button, args.state, self.data.last_press) {
             (Button::Keyboard(Key::A | Key::Left), ButtonState::Press, (false, _, _)) => {
                 self.data.presentation.previous_slide();
+                self.data.time = 0.0;
                 self.data.last_press.0 = true;
             },
             (Button::Keyboard(Key::A | Key::Left), ButtonState::Release, (true, _, _)) => {
@@ -153,6 +191,7 @@ impl Application {
 
             (Button::Keyboard(Key::D | Key::Right), ButtonState::Press, (_, false, _)) => {
                 self.data.presentation.next_slide();
+                self.data.time = 0.0;
                 self.data.last_press.1 = true;
             },
             (Button::Keyboard(Key::D | Key::Right), ButtonState::Release, (_, true, _)) => {

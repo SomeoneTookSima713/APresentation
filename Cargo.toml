@@ -10,6 +10,7 @@ authors = [
 
 [features]
 default_font = []
+debug_features = []
 
 [dependencies]
 log = "0.4"
@@ -23,9 +24,9 @@ piston_window = "0.129"
 piston2d-graphics = "0.43.0"
 pistoncore-glutin_window = "0.71.0"
 piston2d-opengl_graphics = "0.82.0"
-# freetype-rs = "0.32.0"
 fontdue = "0.7"
 meval = "0.2"
+enterpolation = { version = "0.2", default-features = false, features = ["std", "bezier"] }
 serde = { version = "1.0", features = ["derive"] }
 deser-hjson = "2.1.0"
 winit = "0.28.1"

@@ -10,6 +10,7 @@ const FONT_FILE: &'static str = "OpenSans.ttf";
 struct Config {
     app_version: [u8;3],
     include_default_font: bool,
+    enable_debugging_features: bool,
 }
 
 fn main() {
@@ -42,6 +43,10 @@ fn main() {
             write_to_file(font_path, font_bytes.to_vec()).expect("couldn't write data of default font to file");
         }
         println!("cargo:rustc-cfg=default_font");
+    }
+
+    if config.enable_debugging_features {
+        println!("cargo:rustc-cfg=debug_features")
     }
 
     let version_string = match build_type.as_str() {

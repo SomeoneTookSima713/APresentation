@@ -1,5 +1,9 @@
 #![allow(dead_code)]
 
+#[allow(unused)]
+use log::{ debug as log_dbg, info as log_info, warn as log_warn, error as log_err };
+
+/// The alignment of an object.
 #[derive(Clone, Copy, Debug)]
 pub enum Alignment {
     TopLeft,
@@ -95,12 +99,25 @@ use meval::{ Expr, Context };
 use std::ops::Deref;
 use once_cell::sync::Lazy;
 
+/// The default context used for evaluating mathematical expressions.
 pub struct DefaultContext(Lazy<Context<'static>>);
 impl DefaultContext {
     pub const fn new() -> Self {
         DefaultContext(Lazy::new(|| {
-            let ctx = Context::new();
-        
+            use std::f64::consts::{ FRAC_PI_2, PI };
+            let mut ctx = Context::new();
+            
+            // Easing functions
+            ctx.func("easeInSine", |mut t|{ t=t.clamp(0.0,1.0); 1.0-(t*FRAC_PI_2).cos() });
+            ctx.func("easeOutSine", |mut t|{ t=t.clamp(0.0,1.0); (t*FRAC_PI_2).sin() });
+            ctx.func("easeInOutSine", |mut t|{ t=t.clamp(0.0,1.0); -(t*PI).cos()/2.0 + 0.5 });
+            ctx.func2("easeInPow", |mut t,pow|{ t=t.clamp(0.0,1.0); t.powf(pow) });
+            ctx.func2("easeOutPow", |mut t,pow|{ t=t.clamp(0.0,1.0); 1.0-(1.0-t).powf(pow) });
+            ctx.func2("easeInOutPow", |mut t,pow|{ t=t.clamp(0.0,1.0); if t<0.5 {(2.0_f64).powf(pow-1.0)*t.powf(pow)} else {1.0-(-2.0*t+2.0).powf(pow)/2.0} });
+            ctx.func("easeInExp", |mut t|{ t=t.clamp(0.0,1.0); if t==0.0 {0.0} else {2.0_f64.powf(10.0*t-10.0)} });
+            ctx.func("easeOutExp", |mut t|{ t=t.clamp(0.0,1.0); if t==1.0 {1.0} else {1.0-2.0_f64.powf(-10.0*t)} });
+            ctx.func("easeInOutExp", |mut t|{ t=t.clamp(0.0,1.0); if t==0.0 {0.0} else if t==1.0 {1.0} else if t<0.5 {2_f64.powf(20.0*t-10.0)/2.0} else {1.0-2_f64.powf(-20.0*t+10.0)/2.0} });
+
             ctx
         }))
     }
@@ -114,17 +131,35 @@ impl Deref for DefaultContext {
 unsafe impl Send for DefaultContext {}
 unsafe impl Sync for DefaultContext {}
 
+/// The default context used for evaluating mathematical expressions.
 pub static DEFAULT_CONTEXT: DefaultContext = DefaultContext::new();
 
+/// A mathematical expression that depends on the applications resolution.
+/// 
+/// Allows the usage of a percent-sign inside of expressions.
 pub struct ResolutionDependentExpr<'a> {
+    /// The function for evaluating the expression's value.
     pub(self) expr: Box<dyn Fn(f64, f64, f64) -> f64 + 'a>,
+    /// The string the expression was parsed from.
+    /// 
+    /// Used for debugging.
     pub(self) base_string: String,
+    /// The context that was used to construct the evaluation function.
+    /// 
+    /// Used to recreate the function when cloning.
     pub(self) base_context: &'a Context<'a>,
+    /// The type of the expression.
+    /// 
+    /// Decides what the percent sign (`%`) gets replaced with.
+    /// 
+    /// When this value equals [`ResExprType::WidthBased`], any percent sign gets replaced with `/100*w`.
+    /// When it equals [`ResExprType::HeightBased`], percent signs get replaced with `/100*h`.
     pub(self) base_expr_type: ResExprType
 }
 
 impl<'a> Clone for ResolutionDependentExpr<'a> {
     fn clone(&self) -> Self {
+        // Reconstruct the expression
         res_dependent_expr(&self.base_string, self.base_context, self.base_expr_type)
     }
 }
@@ -142,6 +177,7 @@ impl<'a> ResolutionDependentExpr<'a> {
     }
 }
 
+/// A list/tuple of expressions.
 #[derive(Clone)]
 pub struct ExprVector<'a, const N: usize> {
     pub(self) list: [ResolutionDependentExpr<'a>; N]
@@ -166,12 +202,6 @@ impl<'a, const N: usize> From<[ResolutionDependentExpr<'a>; N]> for ExprVector<'
     }
 }
 
-// impl<'a, const N: usize> From<Vec<ResolutionDependentExpr<'a>>> for ExprVector<'a, N> {
-//     fn from(value: Vec<ResolutionDependentExpr<'a>>) -> Self {
-//         ExprVector { list: value.try_into().unwrap() }
-//     }
-// }
-
 impl<'a, const N: usize> TryFrom<Vec<ResolutionDependentExpr<'a>>> for ExprVector<'a, N> {
     type Error = String;
 
@@ -182,17 +212,19 @@ impl<'a, const N: usize> TryFrom<Vec<ResolutionDependentExpr<'a>>> for ExprVecto
 }
 
 impl<'a, const N: usize> ExprVector<'a, N> {
-
+    /// Evaluates all expressions into an array of size `N`
     pub fn evaluate_arr(&self, width: f64, height: f64, time: f64) -> [f64; N] {
         self.list.iter().map(|v| v.evaluate(width, height, time)).collect::<Vec<f64>>().try_into().unwrap()
     }
 }
 impl<'a> ExprVector<'a, 2> {
+    /// Evaluates all expressions into a tuple of 2 elements.
     pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64) -> (f64, f64) {
         (self.list[0].evaluate(width, height, time),self.list[1].evaluate(width, height, time))
     }
 }
 impl<'a> ExprVector<'a, 3> {
+    /// Evaluates all expressions into a tuple of 3 elements.
     pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64) -> (f64, f64, f64) {
         (
             self.list[0].evaluate(width, height, time),
@@ -202,6 +234,7 @@ impl<'a> ExprVector<'a, 3> {
     }
 }
 impl<'a> ExprVector<'a, 4> {
+    /// Evaluates all expressions into a tuple of 4 elements.
     pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64) -> (f64, f64, f64, f64) {
         (
             self.list[0].evaluate(width, height, time),
@@ -212,6 +245,7 @@ impl<'a> ExprVector<'a, 4> {
     }
 }
 
+/// Defines on which dimension of the application window a [`ResolutionDependentExpr`] is relative to.
 #[derive(Clone, Copy)]
 pub enum ResExprType {
     WidthBased,
@@ -231,9 +265,20 @@ impl ResExprType {
     }
 }
 
-/// Parses a string into a mathematical expression, bound into a function with an argument for width, height and time
+/// Parses a string as a function in relation to width, height and time.
+/// 
+/// These expressions also support the percent-sign (`%`). It functions like the percent sign in
+/// CSS.
+/// It gets replaced with '/100*w' or '/100*h' when parsing the expression (which one it is depends
+/// on the specified [`ResExprType`]).
+/// 
+/// Example: `50%` = `50/100*w` = `0.5*w` (`50%` refers to half of the window's width)
 pub fn res_dependent_expr<'a, S: Into<String>>(expr: S, context: &'a Context, expr_type: ResExprType) -> ResolutionDependentExpr<'a> {
+    // Replace percent sign to be able to parse it with meval's parser.
     let string = <S as Into<String>>::into(expr).replace("%", &("/100*".to_owned()+expr_type.str()));
+
+    // Parse the expression and bind it to a function with three arguments
+    // (the window's dimensions and time)
     let parsed_expr = string.clone().parse::<Expr>().unwrap();
     match parsed_expr.bind3_with_context(context, "w", "h", "t") {
         Ok(e) => ResolutionDependentExpr { expr: Box::new(e), base_string: string, base_context: context, base_expr_type: expr_type },
@@ -241,7 +286,7 @@ pub fn res_dependent_expr<'a, S: Into<String>>(expr: S, context: &'a Context, ex
     }
 }
 
-/// Parses a list of expressions separated by semicolons with the [`res_dependent_expr()`]-function
+/// Parses a list of expressions separated by semicolons using the [`res_dependent_expr()`] function.
 pub fn parse_expression_list<'a, S: Into<String>>(string: S, context: &'a Context) -> Vec<ResolutionDependentExpr<'a>> {
     let mut expr_vec = Vec::new();
 
