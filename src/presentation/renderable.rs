@@ -215,7 +215,51 @@ pub struct Text<'a> {
     text: Vec<TextPart<'a, 'a>>,
     wrapping_width: util::ResolutionDependentExpr<'a>,
     size: util::ResolutionDependentExpr<'a>,
-    alignment: util::Alignment
+    alignment: util::Alignment,
+    placeholders: HashMap<String, TextPlaceholderExpr<'a>>
+}
+
+pub struct TextPlaceholderExpr<'a> {
+    /// The function for evaluating the expression's value.
+    pub(self) expr: Box<dyn Fn(f64, f64, f64) -> f64 + 'a>,
+    /// The string the expression was parsed from.
+    /// 
+    /// Used for debugging.
+    pub(self) base_string: String,
+    /// The context that was used to construct the evaluation function.
+    /// 
+    /// Used to recreate the function when cloning.
+    pub(self) base_context: &'a meval::Context<'a>,
+}
+impl<'a> Debug for TextPlaceholderExpr<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TextPlaceholder({})", self.base_string)
+    }
+}
+impl<'a> TextPlaceholderExpr<'a> {
+    fn modify_context(mut context: meval::Context) -> meval::Context {
+        use chrono::{ Datelike, Timelike, Local };
+
+        let datetime = Local::now();
+
+        context.var("day", datetime.day() as f64);
+        context.var("month", datetime.month() as f64);
+        context.var("year", datetime.year() as f64);
+        context.var("hour", datetime.hour() as f64);
+        context.var("minute", datetime.minute() as f64);
+        context.var("second", datetime.second() as f64);
+
+        context
+    }
+
+    pub fn parse<S: Into<String>>(expr: S, context: &'a meval::Context) -> Self {
+        let expr_string: String = expr.into();
+
+        let expr: meval::Expr = expr_string.as_str().parse().unwrap();
+        let ctx = Self::modify_context(context.clone());
+        let func = expr.bind3_with_context(ctx, "w", "h", "t").unwrap();
+        TextPlaceholderExpr { expr: Box::new(func), base_string: expr_string, base_context: context }
+    }
 }
 
 impl<'a> Text<'a> {
@@ -277,12 +321,29 @@ impl<'a> Text<'a> {
         vec
     }
 
-    pub fn new<PosStr, TextStr, WidthStr, SizeStr, AlignStr, ColStr>(pos: PosStr, text: Vec<TextStr>, wrapping_width: WidthStr, size: SizeStr, alignment: AlignStr, color: ColStr, base_font: String, font_list: &'static HashMap<String, RefCell<TextFont>>) -> Text<'a>
-    where PosStr: Into<String>, TextStr: Into<String>, WidthStr: Into<String>, SizeStr: Into<String>, AlignStr: Into<String>, ColStr: Into<String> {
+    pub fn new<PosStr, TextStr, WidthStr, SizeStr, AlignStr, ColStr>(
+        pos: PosStr,
+        text: Vec<TextStr>,
+        wrapping_width: WidthStr,
+        size: SizeStr,
+        alignment: AlignStr,
+        color: ColStr,
+        base_font: String,
+        font_list: &'static HashMap<String, RefCell<TextFont>>,
+        placeholders: HashMap<String, TextPlaceholderExpr<'a>>
+    ) -> Text<'a>
+    where
+        PosStr: Into<String>,
+        TextStr: Into<String>,
+        WidthStr: Into<String>,
+        SizeStr: Into<String>,
+        AlignStr: Into<String>,
+        ColStr: Into<String> {
         let mut text_parts = Vec::new();
         
-        // Small hack/bodge: The text renders one row to high for some reason, so I just added a newline at the beginning
-        text_parts.push(TextPart::NewLine);
+        //  Update: I redid font rendering, now it's fixed.
+        // // Small hack/bodge: The text renders one row to high for some reason, so I just added a newline at the beginning
+        // text_parts.push(TextPart::NewLine);
 
         let size_expr = util::res_dependent_expr(<SizeStr as Into<String>>::into(size), &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased);
 
@@ -304,12 +365,17 @@ impl<'a> Text<'a> {
             text: text_parts,
             wrapping_width: util::res_dependent_expr(<WidthStr as Into<String>>::into(wrapping_width), &util::DEFAULT_CONTEXT, util::ResExprType::WidthBased),
             size: size_expr,
-            alignment: <AlignStr as Into<String>>::into(alignment).into() }
+            alignment: <AlignStr as Into<String>>::into(alignment).into(),
+            placeholders, }
     }
 }
 
 impl<'a> Renderable for Text<'a> {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
+        use regex::Regex;
+        use once_cell::sync::Lazy;
+        const PLACEHOLDER_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"\{\{([^}]*)\}\}").unwrap());
+
         let view_size = context.get_view_size();
         let max_width = self.wrapping_width.evaluate(view_size[0], view_size[1], time);
         let mut current_pos = self.pos.evaluate_tuple(view_size[0], view_size[1], time);
@@ -326,7 +392,20 @@ impl<'a> Renderable for Text<'a> {
             match part {
                 TextPart::Tab => { curr_width += default_size*4.0 },
                 TextPart::NewLine => { height += curr_max_height; curr_width = 0.0 },
-                TextPart::Text { text, bold, italic: _italic, color: _color, size, font } => {
+                TextPart::Text { text: text_base, bold, italic: _italic, color: _color, size, font } => {
+                    let mut text: String = text_base.clone();
+                    for capture in PLACEHOLDER_REGEX.captures_iter(text_base) {
+                        let to_replace = capture.get(0).unwrap();
+                        let placeholder_index = capture.get(1).unwrap();
+                        match self.placeholders.get(placeholder_index.as_str()) {
+                            Some(expression) => {
+                                let eval = (expression.expr)(view_size[0],view_size[1],time);
+                                text = text.replace(to_replace.as_str(), eval.to_string().as_str());
+                            },
+                            // Placeholder can't get replaced, since there's nothing to replace it with
+                            None => {}
+                        }
+                    }
                     let part_size = size.evaluate(view_size[0], view_size[1], time);
                     if curr_max_height<part_size { curr_max_height = part_size }
                     let part_width;
@@ -359,7 +438,21 @@ impl<'a> Renderable for Text<'a> {
                     current_pos.1 += curr_max_height;
                     // curr_max_height = 0.0;
                 },
-                TextPart::Text { text, bold, italic, color, size, font } => {
+                TextPart::Text { text: text_base, bold, italic, color, size, font } => {
+                    let mut text: String = text_base.clone();
+                    for capture in PLACEHOLDER_REGEX.captures_iter(text_base) {
+                        let to_replace = capture.get(0).unwrap();
+                        let placeholder_index = capture.get(1).unwrap();
+                        match self.placeholders.get(placeholder_index.as_str()) {
+                            Some(expression) => {
+                                let eval = (expression.expr)(view_size[0],view_size[1],time);
+                                text = text.replace(to_replace.as_str(), eval.to_string().as_str());
+                            },
+                            // Placeholder can't get replaced, since there's nothing to replace it with
+                            None => {}
+                        }
+                        ()
+                    }
                     let part_font_size = size.evaluate(view_size[0], view_size[1], time);
                     let color_eval = color.evaluate_tuple(view_size[0], view_size[1], time);
 
@@ -370,7 +463,7 @@ impl<'a> Renderable for Text<'a> {
                         false => font_instance = &mut font_borrow.base_font
                     }
 
-                    let part_size = font_instance.size(text, part_font_size);
+                    let part_size = font_instance.size(&text, part_font_size);
 
                     if current_pos.0 + part_size.0 > max_width {
                         current_pos.0 = starting_pos.0;
@@ -380,7 +473,7 @@ impl<'a> Renderable for Text<'a> {
 
                     let ctx = context.trans(current_pos.0, current_pos.1);
 
-                    font_instance.draw(text, part_font_size, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl);
+                    font_instance.draw(&text, part_font_size, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl);
 
                     current_pos.0 += part_size.0;
                 }

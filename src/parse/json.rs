@@ -597,39 +597,58 @@ impl<'a> FromJson for RoundedRect<'a> {
 impl<'a> FromJson for Text<'a> {
     fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
     where Self: Sized {
+        let err = serde::de::Error::custom;
 
         // Get the position, wrapping width, font size, color, font type, alignment and text array
         // from the JSON data
         let pos: String;
         match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
             Ok(p) => pos = p,
-            Err(_) => return Err(serde::de::Error::custom("position needs to be a string"))
+            Err(_) => return Err(err("position needs to be a string"))
         }
         let width: String;
         match get_value_alternates(hashmap, vec!["width", "wrapping_width"])?.clone().try_into() {
             Ok(p) => width = p,
-            Err(_) => return Err(serde::de::Error::custom("wrapping width needs to be a string"))
+            Err(_) => return Err(err("wrapping width needs to be a string"))
         }
         let size: String;
         match get_value_alternates(hashmap, vec!["size", "height", "text_size", "text_height"])?.clone().try_into() {
             Ok(v) => size = v,
-            Err(_) => return Err(serde::de::Error::custom("text height needs to be a string"))
+            Err(_) => return Err(err("text height needs to be a string"))
         }
         let col: String;
         match get_value_alternates(hashmap, vec!["col", "color"])?.clone().try_into() {
             Ok(v) => col = v,
-            Err(_) => return Err(serde::de::Error::custom("color needs to be a string"))
+            Err(_) => return Err(err("color needs to be a string"))
         }
         let font: String;
         match get_value_alternates(hashmap, vec!["font", "base_font"])?.clone().try_into() {
             Ok(v) => font = v,
-            Err(_) => return Err(serde::de::Error::custom("font radius needs to be a string"))
+            Err(_) => return Err(err("font radius needs to be a string"))
         }
         let alignment: String;
         match get_value_alternates(hashmap, vec!["align", "alignment"])?.clone().try_into() {
             Ok(v) => alignment = v,
-            Err(_) => return Err(serde::de::Error::custom("alignment needs to be a string"))
+            Err(_) => return Err(err("alignment needs to be a string"))
         }
+        let placeholders: HashMap<String, TextPlaceholderExpr<'a>> =
+        match get_value_alternates::<String, JSONValue, &'static str, deser_hjson::Error>(hashmap, vec!["placeholders"]) {
+            Ok(placeholders_json) => {
+                use crate::presentation::util::DEFAULT_CONTEXT;
+
+                let context = &DEFAULT_CONTEXT;
+
+                let placeholder_map: HashMap<String, JSONValue> = placeholders_json.clone().try_into().map_err(|_|err("placeholder list must be a dict"))?;
+                placeholder_map.into_iter().map(|(key, json)| {
+                    let expr_string: String = json.try_into().map_err(|_|err("placeholders have to be strings"))?;
+                    Ok((key, TextPlaceholderExpr::parse(expr_string, context)))
+                }).collect::<Result<HashMap<String, TextPlaceholderExpr<'a>>, E>>()?
+            },
+            Err(_) => {
+                HashMap::new()
+            }
+        };
+
         let mut texts: Vec<String> = Vec::new();
         match < JSONValue as TryInto<Vec<JSONValue>> >::try_into(get_value_alternates(&hashmap, vec!["text","texts","lines"])?.clone()) {
             Ok(v) => {
@@ -653,7 +672,8 @@ impl<'a> FromJson for Text<'a> {
                 alignment,
                 col,
                 font,
-                &*crate::app::FONTS.get().ok_or(serde::de::Error::custom("error getting font-list"))?)
+                &*crate::app::FONTS.get().ok_or(serde::de::Error::custom("error getting font-list"))?,
+                placeholders)
         )
     }
 }
