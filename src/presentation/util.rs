@@ -106,6 +106,42 @@ impl DefaultContext {
         DefaultContext(Lazy::new(|| {
             use std::f64::consts::{ FRAC_PI_2, PI };
             let mut ctx = Context::new();
+            /*
+                Current list of available functions:
+
+                Functions built into the meval crate:
+                sqrt(x)                      - computes the square root of x
+                exp(x)                       - computes e^x
+                ln(x)                        - computes the natural log of x
+                abs(x)                       - computes the absolute value of x
+                sin(x), cos(x), tan(x)       - the base trigonometric functions
+                asin(x), acos(x), atan(x)    - the inverses of the base trigonometric functions
+                sinh(x), cosh(x), tanh(x)    - the hyperbolic versions of sin, cos and tan
+                asinh(x), acosh(x), atanh(x) - the inverses of sinh, cosh and tanh
+                floor(x), ceil(x)            - rounds down/up to the nearest integer
+                round(x)                     - rounds to the nearest integer
+                signum(x)                    - computes the sign of x (-1 if negative, 1 if positive)
+                atan2(y,x)                   - computes the four quadrant arc tangent of y and x
+                max(x,y,z,...)               - returns the highest supplied value
+                min(x,y,z,...)               - returns the lowest supplied value
+
+                Easing functions: (see their graphs at https://easings.net/)
+                easeInSine(t)                - an easing function based on the sin function
+                easeOutSine(t)               - an easing function based on the sin function
+                easeInOutSine(t)             - an easing function based on the sin function
+                easeInPow(t,p)               - an easing function based on an exponent (uses p as the power)
+                easeOutPow(t,p)              - an easing function based on an exponent (uses p as the power)
+                easeInOutPow(t,p)            - an easing function based on an exponent (uses p as the power)
+                easeInExp(t)                 - an easing function based on exponential functions
+                easeOutExp(t)                - an easing function based on exponential functions
+                easeInOutExp(t)              - an easing function based on exponential functions
+
+                Other functions:
+                clamp(x,min,max)             - clamps x in the range from min to max
+                isEqual(a,b)                 - returns 1 if a and b are equal, otherwise returns 0
+                isGreater(a,b)               - returns 1 if a is greater than b, otherwise returns 0
+                isLess(a,b)                  - returns 1 if a is less than b, otherwise returns 0
+            */
             
             // Easing functions
             ctx.func("easeInSine", |mut t|{ t=t.clamp(0.0,1.0); 1.0-(t*FRAC_PI_2).cos() });
@@ -117,6 +153,12 @@ impl DefaultContext {
             ctx.func("easeInExp", |mut t|{ t=t.clamp(0.0,1.0); if t==0.0 {0.0} else {2.0_f64.powf(10.0*t-10.0)} });
             ctx.func("easeOutExp", |mut t|{ t=t.clamp(0.0,1.0); if t==1.0 {1.0} else {1.0-2.0_f64.powf(-10.0*t)} });
             ctx.func("easeInOutExp", |mut t|{ t=t.clamp(0.0,1.0); if t==0.0 {0.0} else if t==1.0 {1.0} else if t<0.5 {2_f64.powf(20.0*t-10.0)/2.0} else {1.0-2_f64.powf(-20.0*t+10.0)/2.0} });
+
+            // Random functions
+            ctx.func3("clamp",|num,min,max|num.clamp(min, max));
+            ctx.func2("isEqual",|a,b|match a==b { true=>1.0, false=>0.0 });
+            ctx.func2("isGreater",|a,b|match a>b { true=>1.0, false=>0.0 });
+            ctx.func2("isLess",|a,b|match a<b { true=>1.0, false=>0.0 });
 
             ctx
         }))
