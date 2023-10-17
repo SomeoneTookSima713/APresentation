@@ -9,10 +9,13 @@ use graphics::{ Context, Transformed };
 use graphics;
 use super::util;
 
+/// This trait defines shared behaviour for any object of a slide that should be rendered to the
+/// screen (referred to in this project as `Renderable objects` or `objects`).
 pub trait Renderable: Debug {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics);
 }
 
+/// A wrapper for a reference to any object implementing [`Renderable`]
 pub struct RenderableRef<'a> {
     reference: &'a dyn Renderable
 }
@@ -57,6 +60,9 @@ impl<'a> Renderable for ColoredRect<'a> {
         let color_eval = self.color.evaluate_arr(view_size[0], view_size[1], time);
         let pos_eval = self.pos.evaluate_tuple(view_size[0], view_size[1], time);
         let size_eval = self.size.evaluate_tuple(view_size[0], view_size[1], time);
+        // Convert the alignment to scalar values.
+        //   Subtracting the size of the object multiplied by this value from the position of the
+        //   object correctly positions it relative to it's pivot.
         let alignment: (f64, f64) = self.alignment.into();
         graphics::rectangle(
             [color_eval[0] as f32, color_eval[1] as f32, color_eval[2] as f32, color_eval[3] as f32],
@@ -67,7 +73,11 @@ impl<'a> Renderable for ColoredRect<'a> {
 impl<'a> ColoredRect<'a> {
     pub fn new<PosStr, SizeStr, ColorStr, AlignStr>(pos: PosStr, size: SizeStr, color: ColorStr, alignment: AlignStr) -> Self
     where PosStr: Into<String>, SizeStr: Into<String>, ColorStr: Into<String>, AlignStr: Into<String> {
-        ColoredRect { pos: util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).try_into().unwrap(), size: util::parse_expression_list(size, &util::DEFAULT_CONTEXT).try_into().unwrap(), color: util::parse_expression_list(color, &util::DEFAULT_CONTEXT).try_into().unwrap(), alignment: <AlignStr as Into<String>>::into(alignment).into() }
+        ColoredRect {
+            pos: util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).try_into().unwrap(),
+            size: util::parse_expression_list(size, &util::DEFAULT_CONTEXT).try_into().unwrap(),
+            color: util::parse_expression_list(color, &util::DEFAULT_CONTEXT).try_into().unwrap(),
+            alignment: <AlignStr as Into<String>>::into(alignment).into() }
     }
 }
 
@@ -368,13 +378,28 @@ impl<'a> Text<'a> {
             alignment: <AlignStr as Into<String>>::into(alignment).into(),
             placeholders, }
     }
+
+    fn pad_num<'b>(num: f64, pad_amount: i32, pad_char: &str, pad_dir_str: &str) -> &'b str {
+        let numstr = num.to_string();
+        let mut padstr = String::new();
+        if pad_amount-numstr.len() as i32 > 0 {
+            for _ in 0..pad_amount as usize-numstr.len() {
+                padstr.push_str(pad_char);
+            }
+        }
+        match pad_dir_str {
+            "<" => format!("{padstr}{numstr}").leak(),
+            ">" => format!("{numstr}{padstr}").leak(),
+            _ => padstr.leak()
+        }
+    }
 }
 
 impl<'a> Renderable for Text<'a> {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
         use regex::Regex;
         use once_cell::sync::Lazy;
-        const PLACEHOLDER_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"\{\{([^}]*)\}\}").unwrap());
+        const PLACEHOLDER_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"\{((?<padchar>[^:])(?<paddir>[<>])(?<padamount>\d+))?\{(?<name>[^}]*)\}\}").unwrap());
 
         let view_size = context.get_view_size();
         let max_width = self.wrapping_width.evaluate(view_size[0], view_size[1], time);
@@ -396,11 +421,14 @@ impl<'a> Renderable for Text<'a> {
                     let mut text: String = text_base.clone();
                     for capture in PLACEHOLDER_REGEX.captures_iter(text_base) {
                         let to_replace = capture.get(0).unwrap();
-                        let placeholder_index = capture.get(1).unwrap();
+                        let placeholder_index = capture.name("name").unwrap();
+                        let padchar = capture.name("padchar").map(|m| m.as_str()).unwrap_or(" ");
+                        let padamount = capture.name("padamount").map(|m| m.as_str().parse::<i32>().unwrap()).unwrap_or(0);
+                        let paddir = capture.name("paddir").map(|m| m.as_str()).unwrap_or("<");
                         match self.placeholders.get(placeholder_index.as_str()) {
                             Some(expression) => {
                                 let eval = (expression.expr)(view_size[0],view_size[1],time);
-                                text = text.replace(to_replace.as_str(), eval.to_string().as_str());
+                                text = text.replace(to_replace.as_str(), Self::pad_num(eval, padamount, padchar, paddir));
                             },
                             // Placeholder can't get replaced, since there's nothing to replace it with
                             None => {}
@@ -442,11 +470,14 @@ impl<'a> Renderable for Text<'a> {
                     let mut text: String = text_base.clone();
                     for capture in PLACEHOLDER_REGEX.captures_iter(text_base) {
                         let to_replace = capture.get(0).unwrap();
-                        let placeholder_index = capture.get(1).unwrap();
+                        let placeholder_index = capture.name("name").unwrap();
+                        let padchar = capture.name("padchar").map(|m| m.as_str()).unwrap_or(" ");
+                        let padamount = capture.name("padamount").map(|m| m.as_str().parse::<i32>().unwrap()).unwrap_or(0);
+                        let paddir = capture.name("paddir").map(|m| m.as_str()).unwrap_or("<");
                         match self.placeholders.get(placeholder_index.as_str()) {
                             Some(expression) => {
                                 let eval = (expression.expr)(view_size[0],view_size[1],time);
-                                text = text.replace(to_replace.as_str(), eval.to_string().as_str());
+                                text = text.replace(to_replace.as_str(), Self::pad_num(eval, padamount, padchar, paddir));
                             },
                             // Placeholder can't get replaced, since there's nothing to replace it with
                             None => {}
