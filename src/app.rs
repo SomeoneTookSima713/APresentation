@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::cell::{ RefCell };
+use std::cell::RefCell;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 use opengl_graphics::{ GlGraphics, OpenGL };
 use piston::{RenderArgs, UpdateArgs, ButtonArgs, Button, ButtonState, Key};
@@ -32,6 +33,10 @@ pub struct AppData {
     /// 
     /// Gets used for calculating the properties of [`Renderable`] objects.
     time: f64,
+    /// The time of the last frame.
+    /// 
+    /// Used for calculating the time elapsed between frames.
+    last_frame: Instant,
     /// Gets used for measuring FPS
     /// 
     /// Only enabled in debug relases or with the 'debug_features' feature-flag.
@@ -64,11 +69,12 @@ impl AppData {
             {
                 let bytes = include_bytes!("OpenSans.ttf") as &[u8];
 
-                let face = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).expect("couldn't parse default font's data");
+                // let face = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).expect("couldn't parse default font's data");
 
-                let font = crate::render::font::Font { base: face };
+                let base_font = crate::render::font::Font::from_bytes(bytes.to_vec(), 0).expect("couldn't parse default font's data");
+                let bold_font = crate::render::font::Font::from_bytes(bytes.to_vec(), 0).expect("couldn't parse default font's data");
 
-                map.insert("Default".to_owned(), RefCell::new(presentation::TextFont { base_font: font.clone(), bold_font: font.clone() }));
+                map.insert("Default".to_owned(), RefCell::new(presentation::TextFont { base_font, bold_font }));
             }
 
             for (name, path) in document_fonts {
@@ -97,7 +103,7 @@ impl AppData {
         #[cfg(default_font)]
         {
             let mut last_slide = presentation::Slide::new(Box::new(presentation::ColoredRect::new("0;0", "w;h", "0;0;0;1", "TOP_LEFT")) as Box<dyn presentation::Renderable>);
-            last_slide.add(presentation::Text::new("0;0", vec!["End of presentation"], "w", "4%", "TOP_LEFT", "1;1;1;1", "Default".to_owned(), &*FONTS.get().unwrap(), HashMap::new()), 0);
+            last_slide.add(presentation::Text::new("0;0", vec!["End of presentation"], "w", "4%", "TOP_LEFT", "1;1;1;1", "Default".to_owned(), &*FONTS.get().unwrap(), heapless::FnvIndexMap::new(), "LEFT"), 0);
 
             presentation.add_slide(last_slide);
         }
@@ -105,6 +111,7 @@ impl AppData {
         AppData {
             presentation,
             time: 0.0,
+            last_frame: Instant::now(),
             #[cfg(any(debug_features))]
             timeint: 0,
             #[cfg(any(debug_features))]
@@ -153,6 +160,13 @@ impl Application {
             self.data.frames += 1;
         }
 
+        // Calculate how much time has passed since rendering the last frame, then set
+        // self.data.last_frame to the current point in time for the next frame.
+        let now = Instant::now();
+        let dt = self.data.last_frame.elapsed().as_secs_f64();
+        self.data.time += dt;
+        self.data.last_frame = now;
+
         // Draw the presentation
         self.opengl_backend.draw(args.viewport(), |c, gl| {
             // We need to set a local variable here to copy the value, because we already mutably
@@ -166,13 +180,14 @@ impl Application {
 
     /// Updates the application.
     /// 
-    /// Currently only used for updating time. (and measuring FPS if debugging is enabled)
-    pub fn update(&mut self, args: &UpdateArgs) {
-        self.data.time += args.dt;
+    /// Currently only used for measuring FPS if debugging is enabled.
+    pub fn update(&mut self, _args: &UpdateArgs) {
+        // self.data.time += args.dt;
         #[cfg(any(debug_features))]
         if self.data.time>= self.data.timeint as f64 + 1.0 {
             self.data.timeint += 1;
-            log_dbg!("FPS: {} / {}", self.data.frames, 1.0/args.dt);
+            // The amount that update() gets called every second is fixed at 120 times per second.
+            log_dbg!("FPS: {} / {}", self.data.frames, 120.0);
             self.data.frames = 0;
         }
     }

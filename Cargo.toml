@@ -6,6 +6,16 @@ authors = [
     "S4lm0n3ll3"
 ]
 
+[profile.release]
+opt-level = 3
+overflow-checks = false
+
+[profile.optimized]
+inherits = "release"
+opt-level = 3
+codegen-units = 1
+lto = "fat"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
@@ -15,21 +25,30 @@ debug_features = []
 [dependencies]
 log = "0.4"
 pretty_env_logger = "0.5"
-lazy_static = "1.4"
-anyhow = "1.0"
-regex = "1"
-once_cell = "1.18"
+
+winit = "0.28.1"
 piston = "0.53.2"
 piston_window = "0.129"
 piston2d-graphics = "0.43.0"
 pistoncore-glutin_window = "0.71.0"
 piston2d-opengl_graphics = "0.82.0"
 fontdue = "0.7"
+image = "0.24"
+
 meval = "0.2"
 chrono = "0.4"
+regex = "1"
+
 serde = { version = "1.0", features = ["derive"] }
 deser-hjson = "2.1.0"
-winit = "0.28.1"
+
+anyhow = "1.0"
+lazy_static = "1.4"
+once_cell = "1.18"
+heapless = "0.7"
+
+mimalloc = { version = "0.1.17", default-features = false }
+# jemallocator = "0.5.4"
 
 [build-dependencies]
 serde = { version = "1.0", features = ["derive"] }

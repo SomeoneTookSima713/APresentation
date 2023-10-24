@@ -631,7 +631,12 @@ impl<'a> FromJson for Text<'a> {
             Ok(v) => alignment = v,
             Err(_) => return Err(err("alignment needs to be a string"))
         }
-        let placeholders: HashMap<String, TextPlaceholderExpr<'a>> =
+        let text_alignment: String;
+        match get_value_alternates(hashmap, vec!["text_align", "text_alignment"])?.clone().try_into() {
+            Ok(v) => text_alignment = v,
+            Err(_) => text_alignment = "LEFT".to_owned()
+        }
+        let placeholders: heapless::FnvIndexMap<heapless::String<32>, TextPlaceholderExpr<'a>, { Text::PLACEHOLDER_AMOUNT }> =
         match get_value_alternates::<String, JSONValue, &'static str, deser_hjson::Error>(hashmap, vec!["placeholders"]) {
             Ok(placeholders_json) => {
                 use crate::presentation::util::DEFAULT_CONTEXT;
@@ -639,13 +644,16 @@ impl<'a> FromJson for Text<'a> {
                 let context = &DEFAULT_CONTEXT;
 
                 let placeholder_map: HashMap<String, JSONValue> = placeholders_json.clone().try_into().map_err(|_|err("placeholder list must be a dict"))?;
-                placeholder_map.into_iter().map(|(key, json)| {
+                let mut placeholder_index_map = heapless::FnvIndexMap::new();
+                for (key, json) in placeholder_map {
                     let expr_string: String = json.try_into().map_err(|_|err("placeholders have to be strings"))?;
-                    Ok((key, TextPlaceholderExpr::parse(expr_string, context)))
-                }).collect::<Result<HashMap<String, TextPlaceholderExpr<'a>>, E>>()?
+                    placeholder_index_map.insert(heapless::String::<32>::from(key.as_str()), TextPlaceholderExpr::parse(expr_string, context))
+                        .map_err(|_|err("too many placeholders"))?;
+                }
+                placeholder_index_map
             },
             Err(_) => {
-                HashMap::new()
+                heapless::FnvIndexMap::new()
             }
         };
 
@@ -673,7 +681,8 @@ impl<'a> FromJson for Text<'a> {
                 col,
                 font,
                 &*crate::app::FONTS.get().ok_or(serde::de::Error::custom("error getting font-list"))?,
-                placeholders)
+                placeholders,
+                text_alignment)
         )
     }
 }

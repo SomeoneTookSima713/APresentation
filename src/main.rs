@@ -1,8 +1,12 @@
 #![feature(const_trait_impl)]
+#![feature(maybe_uninit_array_assume_init)]
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::env;
 use std::fmt::Debug;
-use opengl_graphics::{ OpenGL };
+use opengl_graphics::OpenGL;
 use piston::input::*;
 use piston_window::PistonWindow;
 

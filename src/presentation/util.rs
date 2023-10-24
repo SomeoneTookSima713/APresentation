@@ -17,6 +17,12 @@ pub enum Alignment {
     BottomCentered
 }
 
+impl Alignment {
+    pub fn multipliers(&self) -> (f64, f64) {
+        (*self).into()
+    }
+}
+
 impl Into<(f64,f64)> for Alignment {
     fn into(self) -> (f64,f64) {
         match self {
@@ -45,7 +51,7 @@ impl From<&str> for Alignment {
             "BOTTOM_LEFT" | "BottomLeft" => Alignment::BottomLeft,
             "BOTTOM_RIGHT" | "BottomRight" => Alignment::BottomRight,
             "BOTTOM_CENTERED" | "BottomCentered" => Alignment::BottomCentered,
-            _ => panic!("No Alignment found!")
+            s => panic!("No Alignment found! ({s})")
         }
     }
 }

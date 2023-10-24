@@ -58,4 +58,10 @@ fn main() {
 
     let version_path = cwd.join("src/version");
     write_to_file(version_path, version_string).expect("couldn't write file for version string");
+
+    // Increase stack size on Windows
+    if std::env::var("CARGO_CFG_TARGET_ENV").ok() == Some("msvc".to_owned()) {
+        // Increase stack size to 16 MB
+        println!("cargo:rustc-link-arg=/stack:{}", 16 * 1024 * 1024);
+    }
 }

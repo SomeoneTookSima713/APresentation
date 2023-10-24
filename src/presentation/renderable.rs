@@ -91,6 +91,9 @@ pub struct RoundedRect<'a> {
 }
 impl<'a> Renderable for RoundedRect<'a> {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
+        use graphics::Graphics;
+        // use std::f64::consts::PI;
+
         let view_size = context.get_view_size();
         let color_eval = self.color.evaluate_arr(view_size[0], view_size[1], time);
         let color_arr = [color_eval[0] as f32, color_eval[1] as f32, color_eval[2] as f32, color_eval[3] as f32];
@@ -98,27 +101,13 @@ impl<'a> Renderable for RoundedRect<'a> {
         let size_eval = self.size.evaluate_tuple(view_size[0], view_size[1], time);
         let corner_rounding_eval = self.corner_rounding.evaluate(view_size[0], view_size[1], time);
         let alignment: (f64, f64) = self.alignment.into();
+        let arc_tri_count: u32 = (corner_rounding_eval as u32 / 2).max(6);
+        
         pos_eval = (pos_eval.0 - size_eval.0 * alignment.0, pos_eval.1 - size_eval.1 * alignment.1);
-        graphics::ellipse(color_arr,
-            [pos_eval.0,pos_eval.1,corner_rounding_eval,corner_rounding_eval],
-            context.transform, opengl);
-        graphics::ellipse(color_arr,
-            [pos_eval.0+size_eval.0-corner_rounding_eval,pos_eval.1,corner_rounding_eval,corner_rounding_eval],
-            context.transform, opengl);
-        graphics::ellipse(color_arr,
-            [pos_eval.0,pos_eval.1+size_eval.1-corner_rounding_eval,corner_rounding_eval,corner_rounding_eval],
-            context.transform, opengl);
-        graphics::ellipse(color_arr,
-            [pos_eval.0+size_eval.0-corner_rounding_eval,pos_eval.1+size_eval.1-corner_rounding_eval,corner_rounding_eval,corner_rounding_eval],
-            context.transform, opengl);
-        graphics::rectangle(
-            color_arr,
-            [pos_eval.0+corner_rounding_eval/2.0,pos_eval.1,size_eval.0-corner_rounding_eval,size_eval.1],
-            context.transform, opengl);
-        graphics::rectangle(
-            color_arr,
-            [pos_eval.0,pos_eval.1+corner_rounding_eval/2.0,size_eval.0,size_eval.1-corner_rounding_eval],
-            context.transform, opengl);
+
+        opengl.tri_list(&context.draw_state, &color_arr, |tri| {
+            graphics::triangulation::with_round_rectangle_tri_list(arc_tri_count, context.transform, [pos_eval.0,pos_eval.1,size_eval.0,size_eval.1], corner_rounding_eval, tri);
+        });
     }
 }
 impl<'a> RoundedRect<'a> {
@@ -136,7 +125,7 @@ impl<'a> RoundedRect<'a> {
 
 use crate::render::font;
 
-#[derive(Clone)]
+// #[derive(Clone)]
 pub struct TextFont {
     pub base_font: font::Font,
     pub bold_font: font::Font
@@ -165,7 +154,7 @@ use std::cell::RefCell;
 #[derive(Clone)]
 pub enum TextPart<'a, 'font> {
     Text {
-        text: String,
+        text: heapless::String<64>,
         bold: bool,
         italic: bool,
         color: util::ExprVector<'a, 4>,
@@ -173,6 +162,10 @@ pub enum TextPart<'a, 'font> {
         font: &'font RefCell<TextFont>
     },
     Tab,
+    Space {
+        size: util::ResolutionDependentExpr<'a>,
+        font: &'font RefCell<TextFont>
+    },
     NewLine
 }
 
@@ -181,6 +174,7 @@ impl<'a, 'font> std::fmt::Debug for TextPart<'a, 'font> {
         match self {
             TextPart::Text { text, bold, italic, color, size, font } => { write!(f, "\"{}\"", text) },
             TextPart::Tab => { write!(f, "\\t") },
+            TextPart::Space { size, font } => { write!(f, "\\s") },
             TextPart::NewLine => { write!(f, "\\n") }
         }
     }
@@ -222,16 +216,17 @@ impl<'a, 'font> TextPart<'a, 'font> {
 #[derive(Debug)]
 pub struct Text<'a> {
     pos: util::ExprVector<'a, 2>,
-    text: Vec<TextPart<'a, 'a>>,
+    text: heapless::Vec<TextPart<'a, 'a>, 1024>,
     wrapping_width: util::ResolutionDependentExpr<'a>,
     size: util::ResolutionDependentExpr<'a>,
     alignment: util::Alignment,
-    placeholders: HashMap<String, TextPlaceholderExpr<'a>>
+    text_alignment: util::Alignment,
+    placeholders: heapless::FnvIndexMap<heapless::String<32>, TextPlaceholderExpr<'a>, { Text::PLACEHOLDER_AMOUNT }>
 }
 
 pub struct TextPlaceholderExpr<'a> {
     /// The function for evaluating the expression's value.
-    pub(self) expr: Box<dyn Fn(f64, f64, f64) -> f64 + 'a>,
+    pub(self) expr: &'a mut dyn Fn(&[f64]) -> f64,
     /// The string the expression was parsed from.
     /// 
     /// Used for debugging.
@@ -241,38 +236,65 @@ pub struct TextPlaceholderExpr<'a> {
     /// Used to recreate the function when cloning.
     pub(self) base_context: &'a meval::Context<'a>,
 }
+impl<'a> Drop for TextPlaceholderExpr<'a> {
+    fn drop(&mut self) {
+        let boxed_expr = unsafe {
+            Box::from_raw(self.expr as *mut dyn Fn(&[f64]) -> f64)
+        };
+    }
+}
 impl<'a> Debug for TextPlaceholderExpr<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TextPlaceholder({})", self.base_string)
     }
 }
 impl<'a> TextPlaceholderExpr<'a> {
-    fn modify_context(mut context: meval::Context) -> meval::Context {
-        use chrono::{ Datelike, Timelike, Local };
+    fn modify_context(context: meval::Context) -> meval::Context {
+        // use chrono::{ Datelike, Timelike, Local };
 
-        let datetime = Local::now();
+        // let datetime = Local::now();
 
-        context.var("day", datetime.day() as f64);
-        context.var("month", datetime.month() as f64);
-        context.var("year", datetime.year() as f64);
-        context.var("hour", datetime.hour() as f64);
-        context.var("minute", datetime.minute() as f64);
-        context.var("second", datetime.second() as f64);
+        // context.var("day", datetime.day() as f64);
+        // context.var("month", datetime.month() as f64);
+        // context.var("year", datetime.year() as f64);
+        // context.var("hour", datetime.hour() as f64);
+        // context.var("minute", datetime.minute() as f64);
+        // context.var("second", datetime.second() as f64);
 
         context
     }
 
     pub fn parse<S: Into<String>>(expr: S, context: &'a meval::Context) -> Self {
+        static FUNC_VARS: [&str; 9] = ["w", "h", "t", "day", "month", "year", "hour", "minute", "second"];
+
         let expr_string: String = expr.into();
 
         let expr: meval::Expr = expr_string.as_str().parse().unwrap();
         let ctx = Self::modify_context(context.clone());
-        let func = expr.bind3_with_context(ctx, "w", "h", "t").unwrap();
-        TextPlaceholderExpr { expr: Box::new(func), base_string: expr_string, base_context: context }
+        let func = expr.bindn_with_context(ctx, FUNC_VARS.as_slice()).unwrap();
+        TextPlaceholderExpr { expr: Box::leak(Box::new(func)), base_string: expr_string, base_context: context }
+    }
+
+    pub fn call(&self, width: f64, height: f64, time: f64) -> f64 {
+        use chrono::{ Datelike, Timelike, Local };
+        let datetime = Local::now();
+        (self.expr)(&[
+            width,
+            height,
+            time,
+            datetime.day() as f64,
+            datetime.month() as f64,
+            datetime.year() as f64,
+            datetime.hour() as f64,
+            datetime.minute() as f64,
+            datetime.second() as f64
+        ])
     }
 }
 
 impl<'a> Text<'a> {
+    pub const PLACEHOLDER_AMOUNT: usize = 64;
+
     fn parse<'b, S: AsRef<str>>(string: String, base_size: util::ResolutionDependentExpr<'b>, base_font: S, bold: bool, italic: bool, color: util::ExprVector<'b, 4>, font_list: &'static HashMap<String, RefCell<TextFont>>) -> Vec<TextPart<'b, 'b>> {
         use regex::{ Regex, Captures };
         use std::sync::OnceLock;
@@ -302,7 +324,7 @@ impl<'a> Text<'a> {
             Box::new(|part, captures, fonts| part.set_color(format!("{};{};{};1.0",captures.name("r").unwrap().as_str(),captures.name("g").unwrap().as_str(),captures.name("b").unwrap().as_str()))),
         ];
 
-        let mut vec = vec![ TextPart::Text { text: string, bold, italic, color, size: base_size, font: font_list.get(base_font.as_ref()).unwrap() } ];
+        let mut vec = vec![ TextPart::Text { text: string.as_str().into(), bold, italic, color, size: base_size, font: font_list.get(base_font.as_ref()).unwrap() } ];
 
         let mut construct_vec = Vec::new();
 
@@ -314,13 +336,13 @@ impl<'a> Text<'a> {
                         for text_captures in regex.captures_iter(text) {
                             let text_match = text_captures.get(0).unwrap();
                             let text_content = text_captures.name("content").unwrap();
-                            construct_vec.push(TextPart::Text { text: text[last_match_end..text_match.start()].to_string(), bold, italic, color: color.clone(), size: size.clone(), font });
-                            let mut modified = TextPart::Text { text: text[text_content.start()..text_content.end()].to_string(), bold, italic, color: color.clone(), size: size.clone(), font };
+                            construct_vec.push(TextPart::Text { text: text[last_match_end..text_match.start()].into(), bold, italic, color: color.clone(), size: size.clone(), font });
+                            let mut modified = TextPart::Text { text: text[text_content.start()..text_content.end()].into(), bold, italic, color: color.clone(), size: size.clone(), font };
                             (regex_fns[i])(&mut modified, &text_captures, font_list);
                             construct_vec.push(modified);
                             last_match_end = text_match.end();
                         }
-                        construct_vec.push(TextPart::Text { text: text[last_match_end..].to_string(), bold, italic, color: color.clone(), size: size.clone(), font })
+                        construct_vec.push(TextPart::Text { text: text[last_match_end..].into(), bold, italic, color: color.clone(), size: size.clone(), font })
                     },
                     _ => construct_vec.push(text_part)
                 }
@@ -328,10 +350,37 @@ impl<'a> Text<'a> {
             vec = std::mem::replace(&mut construct_vec, Vec::new());
         }
 
+        // Split the text parts at every space or hyphen to allow for text wrapping.
+        for c in [' ', '-'] {
+            construct_vec = Vec::new();
+            for text_part in vec.into_iter() {
+                match text_part {
+                    TextPart::Text { text, bold, italic, color, size, font } => {
+                        let split = text.split(c).collect::<Vec<&str>>();
+
+                        for (i, &txt) in split.iter().enumerate() {
+                            construct_vec.push(TextPart::Text { text: txt.into(), bold, italic, color: color.clone(), size: size.clone(), font });
+                            if i<split.len()-1 {
+                                construct_vec.push(TextPart::Space { size: size.clone(), font });
+                            }
+                        }
+                    },
+                    _ => construct_vec.push(text_part)
+                }
+            }
+            vec = construct_vec;
+        }
+
+        // Remove any strings of zero length
+        vec = vec.into_iter().filter(|p| match &p {
+            TextPart::Text { text, bold, italic, color, size, font } => text.len()>0,
+            _ => true
+        }).collect();
+
         vec
     }
 
-    pub fn new<PosStr, TextStr, WidthStr, SizeStr, AlignStr, ColStr>(
+    pub fn new<PosStr, TextStr, WidthStr, SizeStr, AlignStr, ColStr, TxtAlignStr>(
         pos: PosStr,
         text: Vec<TextStr>,
         wrapping_width: WidthStr,
@@ -340,7 +389,8 @@ impl<'a> Text<'a> {
         color: ColStr,
         base_font: String,
         font_list: &'static HashMap<String, RefCell<TextFont>>,
-        placeholders: HashMap<String, TextPlaceholderExpr<'a>>
+        placeholders: heapless::FnvIndexMap<heapless::String<32>, TextPlaceholderExpr<'a>, { Text::PLACEHOLDER_AMOUNT }>,
+        text_alignment: TxtAlignStr
     ) -> Text<'a>
     where
         PosStr: Into<String>,
@@ -348,12 +398,9 @@ impl<'a> Text<'a> {
         WidthStr: Into<String>,
         SizeStr: Into<String>,
         AlignStr: Into<String>,
+        TxtAlignStr: Into<String>,
         ColStr: Into<String> {
-        let mut text_parts = Vec::new();
-        
-        //  Update: I redid font rendering, now it's fixed.
-        // // Small hack/bodge: The text renders one row to high for some reason, so I just added a newline at the beginning
-        // text_parts.push(TextPart::NewLine);
+        let mut text_parts = heapless::Vec::new();
 
         let size_expr = util::res_dependent_expr(<SizeStr as Into<String>>::into(size), &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased);
 
@@ -362,9 +409,11 @@ impl<'a> Text<'a> {
         for into_string in text {
             let string: String = into_string.into();
 
-            text_parts.append(&mut Text::parse(string, size_expr.clone(), base_font.clone(), false, false, col_expr.clone(), font_list));
+            for part in Text::parse(string, size_expr.clone(), base_font.clone(), false, false, col_expr.clone(), font_list) {
+                text_parts.push(part).expect("too many text parts");
+            }
 
-            text_parts.push(TextPart::NewLine);
+            text_parts.push(TextPart::NewLine).expect("too many text parts");
         }
 
         // DEBUG: Check if the parsed text actually got parsed correctly
@@ -376,6 +425,7 @@ impl<'a> Text<'a> {
             wrapping_width: util::res_dependent_expr(<WidthStr as Into<String>>::into(wrapping_width), &util::DEFAULT_CONTEXT, util::ResExprType::WidthBased),
             size: size_expr,
             alignment: <AlignStr as Into<String>>::into(alignment).into(),
+            text_alignment: format!("TOP_{}",<TxtAlignStr as Into<String>>::into(text_alignment)).into(),
             placeholders, }
     }
 
@@ -400,49 +450,64 @@ impl<'a> Renderable for Text<'a> {
         use regex::Regex;
         use once_cell::sync::Lazy;
         const PLACEHOLDER_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"\{((?<padchar>[^:])(?<paddir>[<>])(?<padamount>\d+))?\{(?<name>[^}]*)\}\}").unwrap());
+        const ITALIC_ADVANCE_FAC: f64 = 0.15;
 
         let view_size = context.get_view_size();
         let max_width = self.wrapping_width.evaluate(view_size[0], view_size[1], time);
         let mut current_pos = self.pos.evaluate_tuple(view_size[0], view_size[1], time);
         let alignment: (f64, f64) = self.alignment.into();
+        let text_align: f64 = self.text_alignment.multipliers().0;
         
         let default_size = self.size.evaluate(view_size[0], view_size[1], time);
 
         let mut height = 0.0;
+        let mut line_widths: Vec<f64> = Vec::with_capacity(self.text.len()/2+4);
         let mut curr_width = 0.0;
         let mut curr_max_height = 0.0;
 
-        // Calculate the height of the object for the alignment
+        let mut last_char: char = ' ';
+
+        // Calculate the dimensions of the object for the alignment
         for part in self.text.iter() {
             match part {
                 TextPart::Tab => { curr_width += default_size*4.0 },
-                TextPart::NewLine => { height += curr_max_height; curr_width = 0.0 },
-                TextPart::Text { text: text_base, bold, italic: _italic, color: _color, size, font } => {
-                    let mut text: String = text_base.clone();
+                TextPart::NewLine => { height += curr_max_height; line_widths.push(curr_width); curr_width = 0.0 },
+                TextPart::Space { size, font } => {
+                    let part_size = size.evaluate(view_size[0], view_size[1], time);
+                    let width = font.borrow_mut().base_font.size(format!("{last_char} ").as_str(), part_size).0;
+                    curr_width += width;
+                },
+                TextPart::Text { text: text_base, bold, italic, color: _color, size, font } => {
+                    let mut text: heapless::String<64> = text_base.clone();
                     for capture in PLACEHOLDER_REGEX.captures_iter(text_base) {
                         let to_replace = capture.get(0).unwrap();
                         let placeholder_index = capture.name("name").unwrap();
                         let padchar = capture.name("padchar").map(|m| m.as_str()).unwrap_or(" ");
                         let padamount = capture.name("padamount").map(|m| m.as_str().parse::<i32>().unwrap()).unwrap_or(0);
                         let paddir = capture.name("paddir").map(|m| m.as_str()).unwrap_or("<");
-                        match self.placeholders.get(placeholder_index.as_str()) {
+                        match self.placeholders.get(&heapless::String::from(placeholder_index.as_str())) {
                             Some(expression) => {
-                                let eval = (expression.expr)(view_size[0],view_size[1],time);
-                                text = text.replace(to_replace.as_str(), Self::pad_num(eval, padamount, padchar, paddir));
+                                let eval = expression.call(view_size[0],view_size[1],time);
+                                text = text.replace(to_replace.as_str(), Self::pad_num(eval, padamount, padchar, paddir)).as_str().into();
                             },
                             // Placeholder can't get replaced, since there's nothing to replace it with
                             None => {}
                         }
                     }
+                    last_char = text.chars().last().unwrap();
                     let part_size = size.evaluate(view_size[0], view_size[1], time);
                     if curr_max_height<part_size { curr_max_height = part_size }
-                    let part_width;
+                    let mut part_width;
                     match bold {
                         false => { part_width = font.borrow_mut().base_font.size(text, part_size).0 },
                         true => { part_width = font.borrow_mut().bold_font.size(text, part_size).0 }
                     }
+                    if *italic {
+                        part_width += part_size * ITALIC_ADVANCE_FAC;
+                    }
                     if curr_width+part_width>max_width {
                         height += curr_max_height;
+                        line_widths.push(curr_width);
                         curr_width = 0.0;
                     }
                     curr_width += part_width
@@ -450,8 +515,12 @@ impl<'a> Renderable for Text<'a> {
             }
         }
 
+        line_widths.push(0.0);
+
+        let mut current_line: usize = 0;
+
         let starting_pos = (current_pos.0 - max_width*alignment.0, current_pos.1 - height*alignment.1);
-        current_pos = (current_pos.0 - max_width*alignment.0, current_pos.1 - height*alignment.1);
+        current_pos = (starting_pos.0 + (max_width - line_widths[current_line])*text_align, starting_pos.1);
 
         // curr_max_height = 0.0;
 
@@ -462,28 +531,37 @@ impl<'a> Renderable for Text<'a> {
                     current_pos.0 += default_size*4.0;
                 },
                 TextPart::NewLine => {
-                    current_pos.0 = starting_pos.0;
+                    current_line += 1;
+                    current_pos.0 = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
                     current_pos.1 += curr_max_height;
                     // curr_max_height = 0.0;
                 },
+                TextPart::Space { size, font } => {
+                    let part_size = size.evaluate(view_size[0], view_size[1], time);
+                    let width = font.borrow_mut().base_font.size(format!("{last_char} ").as_str(), part_size).0;
+                    current_pos.0 += width;
+                },
                 TextPart::Text { text: text_base, bold, italic, color, size, font } => {
-                    let mut text: String = text_base.clone();
+                    let mut text: heapless::String<64> = text_base.clone();
                     for capture in PLACEHOLDER_REGEX.captures_iter(text_base) {
                         let to_replace = capture.get(0).unwrap();
                         let placeholder_index = capture.name("name").unwrap();
                         let padchar = capture.name("padchar").map(|m| m.as_str()).unwrap_or(" ");
                         let padamount = capture.name("padamount").map(|m| m.as_str().parse::<i32>().unwrap()).unwrap_or(0);
                         let paddir = capture.name("paddir").map(|m| m.as_str()).unwrap_or("<");
-                        match self.placeholders.get(placeholder_index.as_str()) {
+                        match self.placeholders.get(&heapless::String::from(placeholder_index.as_str())) {
                             Some(expression) => {
-                                let eval = (expression.expr)(view_size[0],view_size[1],time);
-                                text = text.replace(to_replace.as_str(), Self::pad_num(eval, padamount, padchar, paddir));
+                                let eval = expression.call(view_size[0],view_size[1],time);
+                                text = text.replace(to_replace.as_str(), Self::pad_num(eval, padamount, padchar, paddir)).as_str().into();
                             },
                             // Placeholder can't get replaced, since there's nothing to replace it with
                             None => {}
                         }
                         ()
                     }
+
+                    last_char = text.chars().last().unwrap();
+
                     let part_font_size = size.evaluate(view_size[0], view_size[1], time);
                     let color_eval = color.evaluate_tuple(view_size[0], view_size[1], time);
 
@@ -494,17 +572,21 @@ impl<'a> Renderable for Text<'a> {
                         false => font_instance = &mut font_borrow.base_font
                     }
 
-                    let part_size = font_instance.size(&text, part_font_size);
+                    let mut part_size = font_instance.size(text.clone(), part_font_size);
 
-                    if current_pos.0 + part_size.0 > max_width {
-                        current_pos.0 = starting_pos.0;
+                    if *italic {
+                        part_size.0 += part_font_size * ITALIC_ADVANCE_FAC;
+                    }
+
+                    if current_pos.0 + part_size.0 - starting_pos.0 > max_width {
+                        current_pos.0 = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
                         current_pos.1 += curr_max_height;
                         // curr_max_height = 0.0;
                     }
 
                     let ctx = context.trans(current_pos.0, current_pos.1);
 
-                    font_instance.draw(&text, part_font_size, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl);
+                    font_instance.draw(text, part_font_size, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl);
 
                     current_pos.0 += part_size.0;
                 }
