@@ -59,20 +59,17 @@ impl Font {
         }).unwrap_or_else(|i|i);
         let base = &self.bases[base_index.min(self.bases.len()-1)].0;
 
-        let mut x = 10.0;
+        let mut x = 0.0;
         let mut y = 0.0;
-        let height = base.rasterize('█', size).0.height as f32;
+        let height = size;
         let mut res = Vec::with_capacity(text.len());
-
-        let mut last_width: usize = 0;
-        let mut last_advance_width: f32 = 0.0;
-        let mut last_xmin: i32 = 0;
 
         let size_ind: u32 = size as u32;
 
         for ch in text.chars() {
             let ind = (ch, size_ind);
             if self.cached_glyphs.get(&ind).is_none() {
+                log::debug!("Rasterizing character '{ch}'");
                 let g = base.rasterize_subpixel(ch, size);
                 
                 let mut bitmap = Vec::with_capacity(g.1.len()/3+1);
@@ -100,12 +97,8 @@ impl Font {
     
             x += metrics.advance_width;
             y += metrics.advance_height;
-
-            last_width = metrics.width;
-            last_advance_width = metrics.advance_width;
-            last_xmin = metrics.xmin;
         }
-        (res, x as f64 - last_advance_width as f64 + last_xmin as f64 + last_width as f64)
+        (res, x as f64)
     }
 
     fn render_text<G, T>(glyphs: &[(&T, [f64; 2])], c: &Context, gl: &mut G, color: [f32;4], italic: bool)

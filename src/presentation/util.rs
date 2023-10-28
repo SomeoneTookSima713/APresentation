@@ -61,46 +61,6 @@ impl From<String> for Alignment {
     }
 }
 
-use std::hash::{ Hasher, BuildHasher };
-
-/// Primitively simple hashing algorithm to simply ensure that a [`HashMap`]s ordering when using [`u8`]s as keys is known at compile-time.
-pub struct SimplestHasher {
-    bytes: Vec<u8>
-}
-
-impl Default for SimplestHasher {
-    fn default() -> Self {
-        SimplestHasher { bytes: Vec::new() }
-    }
-}
-
-impl Hasher for SimplestHasher {
-    fn write(&mut self, bytes: &[u8]) {
-        self.bytes.extend_from_slice(bytes);
-    }
-
-    fn write_u8(&mut self, i: u8) {
-        self.bytes.push(i);
-    }
-
-    fn finish(&self) -> u64 {
-        let mut bytes: Vec<u8> = self.bytes.iter().map(|val| *val).collect();
-        bytes.push(0);
-        bytes.push(0);
-        bytes.push(0);
-        bytes.push(0);
-        bytes[0] as u64 + (bytes[1] as u64).wrapping_shl(8) + (bytes[2] as u64).wrapping_shl(16) + (bytes[3] as u64).wrapping_shl(24)
-    }
-}
-
-impl BuildHasher for SimplestHasher {
-    type Hasher = Self;
-
-    fn build_hasher(&self) -> Self::Hasher {
-        SimplestHasher::default()
-    }
-}
-
 use meval::{ Expr, Context };
 use std::ops::Deref;
 use once_cell::sync::Lazy;

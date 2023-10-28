@@ -325,8 +325,8 @@ impl<'a> Text<'a> {
             static ref BOLD_REGEX: Regex = Regex::new(r"\*\*(?<content>.+?)\*\*").unwrap();
             static ref ITALIC_REGEX: Regex = Regex::new(r"\*(?<content>.+?)\*").unwrap();
             static ref FONT_REGEX: Regex = Regex::new(r"_(?<font>.+?)_(?<content>.+?)__").unwrap();
-            static ref COLOR_REGEX: Regex = Regex::new(r"`(?<r>\d+);\s*(?<g>\d+);\s*(?<b>\d+)`(?<content>.+?)``").unwrap();
-            static ref SIZE_REGEX: Regex = Regex::new(r"~(?<size>\d+?)~(?<content>.+?)~~").unwrap();
+            static ref COLOR_REGEX: Regex = Regex::new(r"`(?<r>[^;`]+);\s*(?<g>[^;`]+);\s*(?<b>[^;`]+)`(?<content>.+?)``").unwrap();
+            static ref SIZE_REGEX: Regex = Regex::new(r"~(?<size>[^~]+?)~(?<content>.+?)~~").unwrap();
         }
         static REGEXES: OnceLock<[Regex; 5]> = OnceLock::new();
         if REGEXES.get().is_none() {
@@ -401,8 +401,7 @@ impl<'a> Text<'a> {
                                 size: size.clone(),
                                 font
                             });
-    
-                            // construct_vec.push(TextPart::Text { text: after.to_owned(), bold, italic, color: color.clone(), size: size.clone(), font });
+
                             leftover_text = after.to_owned();
                         } else {
                             placeholders_exist = false;
@@ -526,23 +525,39 @@ impl<'a> Renderable for Text<'a> {
 
         let mut height = 0.0;
         let mut line_widths: Vec<f64> = Vec::with_capacity(self.text.len()/2+4);
+        let mut line_heights: Vec<f64> = Vec::with_capacity(self.text.len()/8);
         let mut curr_width = 0.0;
-        let mut curr_max_height = 0.0;
+        let mut curr_max_height = default_size;
 
         // Calculate the dimensions of the object for the alignment
         for part in self.text.iter() {
             match part {
-                TextPart::Tab => { curr_width += default_size*4.0 },
-                TextPart::NewLine => { height += curr_max_height; line_widths.push(curr_width); curr_width = 0.0 },
+                TextPart::Tab => {
+                    if curr_width+default_size*4.0<=max_width {
+                        curr_width += default_size*4.0;
+                    }
+                },
+                TextPart::NewLine => {
+                    line_widths.push(curr_width);
+                    line_heights.push(curr_max_height);
+
+                    height += curr_max_height;
+                    curr_width = 0.0;
+                    curr_max_height = default_size;
+                },
                 TextPart::Space { size, font } => {
                     let part_size = size.evaluate(view_size[0], view_size[1], time);
-                    // let width = font.borrow_mut().base_font.size(format!("{last_char} ").as_str(), part_size).0;
+                    if part_size>curr_max_height { curr_max_height = part_size; }
+
                     let width = font.borrow_mut().base_font.size(" ", part_size).0;
-                    curr_width += width;
+                    if curr_width+width<=max_width {
+                        curr_width += width as f64;
+                    }
                 },
                 TextPart::Text { text, bold, italic, color, size, font } => {
+
                     let part_size = size.evaluate(view_size[0], view_size[1], time);
-                    if curr_max_height<part_size { curr_max_height = part_size }
+                    if part_size>curr_max_height { curr_max_height = part_size; }
                     let mut part_width;
                     match bold {
                         false => { part_width = font.borrow_mut().base_font.size(text, part_size).0 },
@@ -554,9 +569,11 @@ impl<'a> Renderable for Text<'a> {
                     if curr_width+part_width>max_width {
                         height += curr_max_height;
                         line_widths.push(curr_width);
+                        line_heights.push(curr_max_height);
                         curr_width = 0.0;
+                        curr_max_height = default_size;
                     }
-                    curr_width += part_width
+                    curr_width += part_width;
                 },
                 TextPart::Placeholder { index, pad_char, pad_amount, bold, italic, color, size, font } => {
                     match self.placeholders.get(index) {
@@ -584,10 +601,12 @@ impl<'a> Renderable for Text<'a> {
                                 part_width += part_size * ITALIC_ADVANCE_FAC;
                             }
 
-                            if curr_width + part_width > max_width {
+                            if curr_width+part_width>max_width {
                                 height += curr_max_height;
                                 line_widths.push(curr_width);
+                                line_heights.push(curr_max_height);
                                 curr_width = 0.0;
+                                curr_max_height = default_size;
                             }
                             curr_width += part_width;
                         },
@@ -598,13 +617,13 @@ impl<'a> Renderable for Text<'a> {
         }
 
         line_widths.push(0.0);
+        line_heights.push(default_size);
 
         let mut current_line: usize = 0;
 
         let starting_pos = (current_pos.0 - max_width*alignment.0, current_pos.1 - height*alignment.1);
         current_pos = (starting_pos.0 + (max_width - line_widths[current_line])*text_align, starting_pos.1);
 
-        // curr_max_height = 0.0;
 
         // Draw the text
         for part in self.text.iter() {
@@ -613,36 +632,16 @@ impl<'a> Renderable for Text<'a> {
                     current_pos.0 += default_size*4.0;
                 },
                 TextPart::NewLine => {
-                    current_line += 1;
                     current_pos.0 = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
-                    current_pos.1 += curr_max_height;
-                    // curr_max_height = 0.0;
+                    current_pos.1 += line_heights[current_line];
+                    current_line += 1;
                 },
                 TextPart::Space { size, font } => {
                     let part_size = size.evaluate(view_size[0], view_size[1], time);
-                    // let width = font.borrow_mut().base_font.size(format!("{last_char} ").as_str(), part_size).0;
                     let width = font.borrow_mut().base_font.size(" ", part_size).0;
-                    current_pos.0 += width;
+                    current_pos.0 += width as f64;
                 },
                 TextPart::Text { text, bold, italic, color, size, font } => {
-                    // let mut text: String = text_base.clone();
-                    // for capture in PLACEHOLDER_REGEX.captures_iter(text_base) {
-                    //     let to_replace = capture.get(0).unwrap();
-                    //     let placeholder_index = capture.name("name").unwrap();
-                    //     let padchar = capture.name("padchar").map(|m| m.as_str()).unwrap_or(" ");
-                    //     let padamount = capture.name("padamount").map(|m| m.as_str().parse::<i32>().unwrap()).unwrap_or(0);
-                    //     let paddir = capture.name("paddir").map(|m| m.as_str()).unwrap_or("<");
-                    //     match self.placeholders.get(&heapless::String::from(placeholder_index.as_str())) {
-                    //         Some(expression) => {
-                    //             let eval = expression.call(view_size[0],view_size[1],time);
-                    //             text = text.replace(to_replace.as_str(), Self::pad_num(eval, padamount, padchar, paddir)).as_str().into();
-                    //         },
-                    //         // Placeholder can't get replaced, since there's nothing to replace it with
-                    //         None => {}
-                    //     }
-                    //     ()
-                    // }
-
                     let part_font_size = size.evaluate(view_size[0], view_size[1], time);
                     let color_eval = color.evaluate_tuple(view_size[0], view_size[1], time);
 
@@ -661,11 +660,11 @@ impl<'a> Renderable for Text<'a> {
 
                     if current_pos.0 + part_size.0 - starting_pos.0 > max_width {
                         current_pos.0 = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
-                        current_pos.1 += curr_max_height;
-                        // curr_max_height = 0.0;
+                        current_pos.1 += line_heights[current_line];
+                        current_line += 1;
                     }
 
-                    let ctx = context.trans(current_pos.0, current_pos.1);
+                    let ctx = context.trans(current_pos.0, current_pos.1 + line_heights[current_line] - part_font_size);
 
                     font_instance.draw(text, part_font_size, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl);
 
@@ -702,11 +701,11 @@ impl<'a> Renderable for Text<'a> {
 
                             if current_pos.0 + part_size.0 - starting_pos.0 > max_width {
                                 current_pos.0 = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
-                                current_pos.1 += curr_max_height;
-                                // curr_max_height = 0.0;
+                                current_pos.1 += line_heights[current_line];
+                                current_line += 1;
                             }
 
-                            let ctx = context.trans(current_pos.0, current_pos.1);
+                            let ctx = context.trans(current_pos.0, current_pos.1 + line_heights[current_line] - part_font_size);
 
                             font_instance.draw(text, part_font_size, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl);
 
