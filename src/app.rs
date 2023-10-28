@@ -103,7 +103,7 @@ impl AppData {
         #[cfg(default_font)]
         {
             let mut last_slide = presentation::Slide::new(Box::new(presentation::ColoredRect::new("0;0", "w;h", "0;0;0;1", "TOP_LEFT")) as Box<dyn presentation::Renderable>);
-            last_slide.add(presentation::Text::new("0;0", vec!["End of presentation"], "w", "4%", "TOP_LEFT", "1;1;1;1", "Default".to_owned(), &*FONTS.get().unwrap(), heapless::FnvIndexMap::new(), "LEFT"), 0);
+            last_slide.add(presentation::Text::new("0;0", vec!["End of presentation"], "w", "4%", "TOP_LEFT", "1;1;1;1", "Default".to_owned(), &*FONTS.get().unwrap(), HashMap::new(), "LEFT"), 0);
 
             presentation.add_slide(last_slide);
         }
@@ -140,6 +140,8 @@ impl Application {
             .vsync(vsync)
             .resizable(resizable)
             .decorated(decoration)
+            .samples(0)
+            .srgb(true)
             .build()
             .unwrap();
         // Create the OpenGL context

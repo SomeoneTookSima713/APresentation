@@ -8,7 +8,7 @@ use std::env;
 use std::fmt::Debug;
 use opengl_graphics::OpenGL;
 use piston::input::*;
-use piston_window::PistonWindow;
+use piston_window::{ PistonWindow, Events, EventSettings };
 
 mod app;
 mod util;
@@ -23,11 +23,19 @@ const APPLICATION_VERSION: &'static str = include_str!("version");
 fn run_viewer(args: Vec<String>) -> Result<(), Box<dyn Debug>> {
     let mut application = app::Application::create(OpenGL::V3_2);
 
-    let mut window: PistonWindow = application.init(format!("APresentation - {}",APPLICATION_VERSION), (640,480), true, true, true, args[2].clone());
+    let mut window: PistonWindow = application.init(format!("APresentation - {}",APPLICATION_VERSION), (640,480), false, true, true, args[2].clone());
 
     let mut fullscreen;
 
-    while let Some(e) = window.next() {
+    let mut events = Events::new({
+        let mut settings = EventSettings::new();
+        settings.lazy = false;
+        settings.bench_mode = false;
+        settings.max_fps = std::u64::MAX;
+        settings
+    });
+
+    while let Some(e) = events.next(&mut window) {
         if let Some(args) = e.render_args() {
             application.render(&args);
         }
@@ -54,6 +62,7 @@ fn usage() -> Result<(), Box<dyn Debug>> {
 }
 
 fn main() -> Result<(), Box<dyn Debug>> {
+
     let args = env::args().collect::<Vec<String>>();
 
     if args.len()!=3 {

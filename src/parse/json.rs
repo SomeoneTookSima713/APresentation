@@ -636,7 +636,7 @@ impl<'a> FromJson for Text<'a> {
             Ok(v) => text_alignment = v,
             Err(_) => text_alignment = "LEFT".to_owned()
         }
-        let placeholders: heapless::FnvIndexMap<heapless::String<32>, TextPlaceholderExpr<'a>, { Text::PLACEHOLDER_AMOUNT }> =
+        let placeholders: HashMap<String, TextPlaceholderExpr<'a>> =
         match get_value_alternates::<String, JSONValue, &'static str, deser_hjson::Error>(hashmap, vec!["placeholders"]) {
             Ok(placeholders_json) => {
                 use crate::presentation::util::DEFAULT_CONTEXT;
@@ -644,16 +644,15 @@ impl<'a> FromJson for Text<'a> {
                 let context = &DEFAULT_CONTEXT;
 
                 let placeholder_map: HashMap<String, JSONValue> = placeholders_json.clone().try_into().map_err(|_|err("placeholder list must be a dict"))?;
-                let mut placeholder_index_map = heapless::FnvIndexMap::new();
+                let mut placeholder_hash_map = HashMap::with_capacity(placeholder_map.len());
                 for (key, json) in placeholder_map {
                     let expr_string: String = json.try_into().map_err(|_|err("placeholders have to be strings"))?;
-                    placeholder_index_map.insert(heapless::String::<32>::from(key.as_str()), TextPlaceholderExpr::parse(expr_string, context))
-                        .map_err(|_|err("too many placeholders"))?;
+                    placeholder_hash_map.insert(key, TextPlaceholderExpr::parse(expr_string, context));
                 }
-                placeholder_index_map
+                placeholder_hash_map
             },
             Err(_) => {
-                heapless::FnvIndexMap::new()
+                HashMap::new()
             }
         };
 

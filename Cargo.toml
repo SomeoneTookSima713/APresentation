@@ -12,6 +12,7 @@ overflow-checks = false
 
 [profile.optimized]
 inherits = "release"
+debug = true
 opt-level = 3
 codegen-units = 1
 lto = "fat"
@@ -21,17 +22,18 @@ lto = "fat"
 [features]
 default_font = []
 debug_features = []
+heap_profiling = []
 
 [dependencies]
 log = "0.4"
 pretty_env_logger = "0.5"
 
 winit = "0.28.1"
-piston = "0.53.2"
-piston_window = "0.129"
-piston2d-graphics = "0.43.0"
-pistoncore-glutin_window = "0.71.0"
-piston2d-opengl_graphics = "0.82.0"
+piston = "0.54.0"
+piston_window = "0.130"
+piston2d-graphics = "0.44.0"
+pistoncore-glutin_window = "0.72.0"
+piston2d-opengl_graphics = "0.83.0"
 fontdue = "0.7"
 image = "0.24"
 

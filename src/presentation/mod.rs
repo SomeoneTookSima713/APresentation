@@ -49,7 +49,7 @@ impl Presentation {
                 slide.render(time, context, opengl);
             },
             None => {
-                log_err!("Slide #{} doesn't exist! Switching to slide at position 0...",self.current_slide);
+                log_err!("Slide #{} doesn't exist! Switching to slide #0...",self.current_slide);
                 self.current_slide = 0;
             }
         }
