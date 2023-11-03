@@ -151,9 +151,9 @@ impl DefaultContext {
                 easeInSine(t)                - an easing function based on the sin function
                 easeOutSine(t)               - an easing function based on the sin function
                 easeInOutSine(t)             - an easing function based on the sin function
-                easeInPow(t,p)               - an easing function based on an exponent (uses p as the power)
-                easeOutPow(t,p)              - an easing function based on an exponent (uses p as the power)
-                easeInOutPow(t,p)            - an easing function based on an exponent (uses p as the power)
+                easeInPow(t,p)               - an easing function based on a power function (uses p as the power)
+                easeOutPow(t,p)              - an easing function based on a power function (uses p as the power)
+                easeInOutPow(t,p)            - an easing function based on a power function (uses p as the power)
                 easeInExp(t)                 - an easing function based on exponential functions
                 easeOutExp(t)                - an easing function based on exponential functions
                 easeInOutExp(t)              - an easing function based on exponential functions
