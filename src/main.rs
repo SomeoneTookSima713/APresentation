@@ -1,5 +1,7 @@
 #![feature(const_trait_impl)]
 #![feature(maybe_uninit_array_assume_init)]
+#![feature(auto_traits)]
+#![feature(negative_impls)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

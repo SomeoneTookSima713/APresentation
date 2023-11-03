@@ -16,6 +16,7 @@ use super::presentation;
 // Gets used for automatic links in comments.
 #[allow(unused)]
 use crate::presentation::Renderable;
+use crate::presentation::renderable::BaseProperties;
 
 pub struct Application {
     pub opengl_version: OpenGL,
@@ -102,8 +103,17 @@ impl AppData {
         // font though, as the text needs a font to render itself.
         #[cfg(default_font)]
         {
-            let mut last_slide = presentation::Slide::new(Box::new(presentation::ColoredRect::new("0;0", "w;h", "0;0;0;1", "TOP_LEFT")) as Box<dyn presentation::Renderable>);
-            last_slide.add(presentation::Text::new("0;0", vec!["End of presentation"], "w", "4%", "TOP_LEFT", "1;1;1;1", "Default".to_owned(), &*FONTS.get().unwrap(), HashMap::new(), "LEFT"), 0);
+            let bg = presentation::ColoredRect::new(BaseProperties::new("0;0", "w;h", "0;0;0;1", "TOP_LEFT").map_err(|_|()).unwrap());
+            let mut last_slide = presentation::Slide::new(Box::new(bg) as Box<dyn presentation::Renderable>);
+
+            let text = presentation::Text::new(
+                BaseProperties::new("0;0","w;4%","1;1;1;1","TOP_LEFT").map_err(|_|()).unwrap(),
+                vec!["End of presentation"],
+                "Default".to_owned(),
+                &*FONTS.get().unwrap(),
+                HashMap::new(),
+                "LEFT").map_err(|_|()).unwrap();
+            last_slide.add(text, 0);
 
             presentation.add_slide(last_slide);
         }

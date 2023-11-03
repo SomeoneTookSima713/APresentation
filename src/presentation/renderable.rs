@@ -7,15 +7,24 @@ use std::fmt::Debug;
 use opengl_graphics::GlGraphics;
 use graphics::{ Context, Transformed };
 use graphics;
-use super::util;
+
+use super::util; use util::{ ExprVector, Alignment, PropertyError };
 
 /// This trait defines shared behaviour for any object of a slide that should be rendered to the
 /// screen (referred to in this project as `Renderable objects` or `objects`).
 pub trait Renderable: Debug {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics);
+
+    fn get_base_properties(&self) -> &BaseProperties<'_>;
+
+    /// Basically a copy of the [`Clone::clone`] function because this trait wouldn't be object
+    /// safe anymore if I'd require the [`Clone`] trait to be implemented
+    fn copy<'b>(&self) -> Box<dyn Renderable + 'b>;
 }
 
 /// A wrapper for a reference to any object implementing [`Renderable`]
+/// 
+#[derive(Clone, Copy)]
 pub struct RenderableRef<'a> {
     reference: &'a dyn Renderable
 }
@@ -40,6 +49,18 @@ impl<'a> Renderable for RenderableRef<'a> {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
         self.reference.render(time, context, opengl);
     }
+
+    fn get_base_properties(&self) -> &BaseProperties<'_> {
+        self.reference.get_base_properties()
+    }
+
+    fn copy<'b>(&self) -> Box<dyn Renderable + 'b> {
+        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable + 'a) as *mut (dyn Renderable + 'a);
+        unsafe {
+            let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
+            Box::from_raw(result_ptr)
+        }
+    }
 }
 impl<'a> Debug for RenderableRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -47,60 +68,96 @@ impl<'a> Debug for RenderableRef<'a> {
     }
 }
 
-#[derive(Debug)]
+/// Contains all basic properties that every Renderable object should have.
+#[derive(Debug, Clone)]
+pub struct BaseProperties<'a> {
+    pub pos: ExprVector<'a, 2>,
+    pub size: ExprVector<'a, 2>,
+    pub color: ExprVector<'a, 4>,
+    pub alignment: Alignment
+}
+
+impl<'a> BaseProperties<'a> {
+    /// Constructs new base properties of a Renderable object from four [`String`]s defining position, size, color and alignment.
+    pub fn new<PStr, SStr, CStr, AStr>(pos: PStr, size: SStr, color: CStr, alignment: AStr) -> Result<Self, PropertyError>
+    where
+        PStr: Into<String>,
+        SStr: Into<String>,
+        CStr: Into<String>,
+        AStr: Into<String>
+    {
+        let err = |prop: &'static str| move |e: PropertyError|{
+            match e {
+                PropertyError::SyntaxError(_, _, desc) => PropertyError::SyntaxError("_".to_owned(), prop.to_owned(), desc),
+                _ => e
+            }
+        };
+
+        Ok(BaseProperties {
+            pos: util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).map_err((err)("pos"))?.try_into().map_err((err)("pos"))?,
+            size: util::parse_expression_list(size, &util::DEFAULT_CONTEXT).map_err((err)("size"))?.try_into().map_err((err)("size"))?,
+            color: util::parse_expression_list(color, &util::DEFAULT_CONTEXT).map_err((err)("color"))?.try_into().map_err((err)("color"))?,
+            alignment: Alignment::try_from(alignment.into())?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ColoredRect<'a> {
-    pos: util::ExprVector<'a, 2>,
-    size: util::ExprVector<'a, 2>,
-    color: util::ExprVector<'a, 4>,
-    alignment: util::Alignment
+    base: BaseProperties<'a>
 }
 impl<'a> Renderable for ColoredRect<'a> {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
         let view_size = context.get_view_size();
-        let color_eval = self.color.evaluate_arr(view_size[0], view_size[1], time);
-        let pos_eval = self.pos.evaluate_tuple(view_size[0], view_size[1], time);
-        let size_eval = self.size.evaluate_tuple(view_size[0], view_size[1], time);
+        let color_eval = self.base.color.evaluate_arr(view_size[0], view_size[1], time);
+        let pos_eval = self.base.pos.evaluate_tuple(view_size[0], view_size[1], time);
+        let size_eval = self.base.size.evaluate_tuple(view_size[0], view_size[1], time);
         // Convert the alignment to scalar values.
         //   Subtracting the size of the object multiplied by this value from the position of the
         //   object correctly positions it relative to it's pivot.
-        let alignment: (f64, f64) = self.alignment.into();
+        let alignment: (f64, f64) = self.base.alignment.into();
         graphics::rectangle(
             [color_eval[0] as f32, color_eval[1] as f32, color_eval[2] as f32, color_eval[3] as f32],
             [pos_eval.0-size_eval.0*alignment.0,pos_eval.1-size_eval.1*alignment.1,size_eval.0,size_eval.1],
             context.transform, opengl);
     }
+
+    fn get_base_properties(&self) -> &BaseProperties<'_> {
+        &self.base
+    }
+
+    fn copy<'b>(&self) -> Box<dyn Renderable + 'b>
+    where Self: Sized {
+        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable + 'a) as *mut (dyn Renderable + 'a);
+        unsafe {
+            let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
+            Box::from_raw(result_ptr)
+        }
+    }
 }
 impl<'a> ColoredRect<'a> {
-    pub fn new<PosStr, SizeStr, ColorStr, AlignStr>(pos: PosStr, size: SizeStr, color: ColorStr, alignment: AlignStr) -> Self
-    where PosStr: Into<String>, SizeStr: Into<String>, ColorStr: Into<String>, AlignStr: Into<String> {
-        ColoredRect {
-            pos: util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).try_into().unwrap(),
-            size: util::parse_expression_list(size, &util::DEFAULT_CONTEXT).try_into().unwrap(),
-            color: util::parse_expression_list(color, &util::DEFAULT_CONTEXT).try_into().unwrap(),
-            alignment: <AlignStr as Into<String>>::into(alignment).into() }
+    pub fn new(base: BaseProperties<'a>) -> Self {
+        ColoredRect { base }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RoundedRect<'a> {
-    pos: util::ExprVector<'a, 2>,
-    size: util::ExprVector<'a, 2>,
-    color: util::ExprVector<'a, 4>,
+    base: BaseProperties<'a>,
     corner_rounding: util::ResolutionDependentExpr<'a>,
-    alignment: util::Alignment
 }
+
 impl<'a> Renderable for RoundedRect<'a> {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
         use graphics::Graphics;
-        // use std::f64::consts::PI;
 
         let view_size = context.get_view_size();
-        let color_eval = self.color.evaluate_arr(view_size[0], view_size[1], time);
+        let color_eval = self.base.color.evaluate_arr(view_size[0], view_size[1], time);
         let color_arr = [color_eval[0] as f32, color_eval[1] as f32, color_eval[2] as f32, color_eval[3] as f32];
-        let mut pos_eval = self.pos.evaluate_tuple(view_size[0], view_size[1], time);
-        let size_eval = self.size.evaluate_tuple(view_size[0], view_size[1], time);
+        let mut pos_eval = self.base.pos.evaluate_tuple(view_size[0], view_size[1], time);
+        let size_eval = self.base.size.evaluate_tuple(view_size[0], view_size[1], time);
         let corner_rounding_eval = self.corner_rounding.evaluate(view_size[0], view_size[1], time);
-        let alignment: (f64, f64) = self.alignment.into();
+        let alignment: (f64, f64) = self.base.alignment.into();
         let arc_tri_count: u32 = (corner_rounding_eval as u32 / 2).max(6);
         
         pos_eval = (pos_eval.0 - size_eval.0 * alignment.0, pos_eval.1 - size_eval.1 * alignment.1);
@@ -109,23 +166,31 @@ impl<'a> Renderable for RoundedRect<'a> {
             graphics::triangulation::with_round_rectangle_tri_list(arc_tri_count, context.transform, [pos_eval.0,pos_eval.1,size_eval.0,size_eval.1], corner_rounding_eval, tri);
         });
     }
+
+    fn get_base_properties<'b>(&'b self) -> &'b BaseProperties<'b> {
+        &self.base
+    }
+
+    fn copy<'b>(&self) -> Box<dyn Renderable + 'b> {
+        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable + 'a) as *mut (dyn Renderable + 'a);
+        unsafe {
+            let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
+            Box::from_raw(result_ptr)
+        }
+    }
 }
 impl<'a> RoundedRect<'a> {
-    pub fn new<PosStr, SizeStr, ColorStr, RoundingStr, AlignStr>(pos: PosStr, size: SizeStr, color: ColorStr, corner_rounding: RoundingStr, alignment: AlignStr) -> Self
-    where PosStr: Into<String>, SizeStr: Into<String>, ColorStr: Into<String>, RoundingStr: Into<String>, AlignStr: Into<String> {
-        RoundedRect {
-            pos: util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).try_into().unwrap(),
-            size: util::parse_expression_list(size, &util::DEFAULT_CONTEXT).try_into().unwrap(),
-            color: util::parse_expression_list(color, &util::DEFAULT_CONTEXT).try_into().unwrap(),
-            corner_rounding: util::res_dependent_expr(corner_rounding, &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased),
-            alignment: <AlignStr as Into<String>>::into(alignment).into()
-        }
+    pub fn new<RoundingStr>(base: BaseProperties<'a>, corner_rounding: RoundingStr) -> Result<Self, PropertyError>
+    where RoundingStr: Into<String> {
+        Ok(RoundedRect {
+            base,
+            corner_rounding: util::res_dependent_expr(corner_rounding, &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased)?,
+        })
     }
 }
 
 use crate::render::font;
 
-// #[derive(Clone)]
 pub struct TextFont {
     pub base_font: font::Font,
     pub bold_font: font::Font
@@ -199,45 +264,48 @@ impl<'a, 'font> std::fmt::Debug for TextPart<'a, 'font> {
 }
 
 impl<'a, 'font> TextPart<'a, 'font> {
-    pub fn set_bold(&mut self, set: bool) {
+
+    pub fn set_bold(&mut self, set: bool) -> Result<(), PropertyError> {
         match self {
             TextPart::Text { text, bold, italic, color, size, font } => *bold = set,
             _ => {}
         }
+        Ok(())
     }
-    pub fn set_italic(&mut self, set: bool) {
+    pub fn set_italic(&mut self, set: bool) -> Result<(), PropertyError> {
         match self {
             TextPart::Text { text, bold, italic, color, size, font } => *italic = set,
             _ => {}
         }
+        Ok(())
     }
-    pub fn set_color(&mut self, set: String) {
+    pub fn set_color(&mut self, set: String) -> Result<(), PropertyError> {
         match self {
-            TextPart::Text { text, bold, italic, color, size, font } => *color = util::parse_expression_list(set, &util::DEFAULT_CONTEXT).try_into().unwrap(),
+            TextPart::Text { text, bold, italic, color, size, font } => *color = util::parse_expression_list(set, &util::DEFAULT_CONTEXT)?.try_into()?,
             _ => {}
         }
+        Ok(())
     }
-    pub fn set_size(&mut self, set: String) {
+    pub fn set_size(&mut self, set: String) -> Result<(), PropertyError> {
         match self {
-            TextPart::Text { text, bold, italic, color, size, font } => *size = util::res_dependent_expr(set, &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased),
+            TextPart::Text { text, bold, italic, color, size, font } => *size = util::res_dependent_expr(set, &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased)?,
             _ => {}
         }
+        Ok(())
     }
-    pub fn set_font(&mut self, set: &'font RefCell<TextFont>) {
+    pub fn set_font(&mut self, set: &'font RefCell<TextFont>) -> Result<(), PropertyError> {
         match self {
             TextPart::Text { text, bold, italic, color, size, font } => *font = set,
             _ => {}
         }
+        Ok(())
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Text<'a> {
-    pos: util::ExprVector<'a, 2>,
+    base: BaseProperties<'a>,
     text: Vec<TextPart<'a, 'a>>,
-    wrapping_width: util::ResolutionDependentExpr<'a>,
-    size: util::ResolutionDependentExpr<'a>,
-    alignment: util::Alignment,
     text_alignment: util::Alignment,
     placeholders: HashMap<String, TextPlaceholderExpr<'a>>
 }
@@ -253,6 +321,11 @@ pub struct TextPlaceholderExpr<'a> {
     /// 
     /// Used to recreate the function when cloning.
     pub(self) base_context: &'a meval::Context<'a>,
+}
+impl<'a> Clone for TextPlaceholderExpr<'a> {
+    fn clone(&self) -> Self {
+        Self::parse(&self.base_string, self.base_context)
+    }
 }
 impl<'a> Drop for TextPlaceholderExpr<'a> {
     fn drop(&mut self) {
@@ -318,7 +391,7 @@ const PLACEHOLDER_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"\{((?<padchar>[^
 impl<'a> Text<'a> {
     pub const PLACEHOLDER_AMOUNT: usize = 64;
 
-    fn parse<'b, S: AsRef<str>>(string: String, base_size: util::ResolutionDependentExpr<'b>, base_font: S, bold: bool, italic: bool, color: util::ExprVector<'b, 4>, font_list: &'static HashMap<String, RefCell<TextFont>>) -> Vec<TextPart<'b, 'b>> {
+    fn parse<'b, S: AsRef<str>>(string: String, base_size: util::ResolutionDependentExpr<'b>, base_font: S, bold: bool, italic: bool, color: util::ExprVector<'b, 4>, font_list: &'static HashMap<String, RefCell<TextFont>>) -> Result<Vec<TextPart<'b, 'b>>, PropertyError> {
         use regex::Captures;
         use std::sync::OnceLock;
         lazy_static::lazy_static! {
@@ -339,12 +412,38 @@ impl<'a> Text<'a> {
             ]).map_err(|_| "error initializing regex list").unwrap();
         }
 
-        let regex_fns: [Box<dyn Fn(&mut TextPart, &Captures, &'static HashMap<String, RefCell<TextFont>>)>; 5] = [
-            Box::new(|part, captures, fonts| part.set_size(captures.name("size").unwrap().as_str().to_string())),
-            Box::new(|part, captures, fonts| part.set_font(fonts.get(captures.name("font").unwrap().as_str()).unwrap())),
+        let regex_error_fn = |str: &'static str| { PropertyError::SyntaxError(
+            "Text".to_owned(),
+            "text".to_owned(),
+            Some(str.to_owned())) };
+
+        let regex_fns: [Box<dyn Fn(&mut TextPart, &Captures, &'static HashMap<String, RefCell<TextFont>>) -> Result<(), PropertyError>>; 5] = [
+            Box::new(|part, captures, fonts| {
+                let size = captures.name("size")
+                    .ok_or((regex_error_fn)("No size expression in size redefinition!"))?
+                    .as_str().to_string();
+                part.set_size(size)
+            }),
+            Box::new(|part, captures, fonts| {
+                let f = fonts
+                    .get(captures.name("font")
+                        .ok_or((regex_error_fn)("No font name in font redefinition!"))?
+                        .as_str()
+                    ).ok_or((regex_error_fn)("Invalid font name in font redefinition!"))?;
+                part.set_font(f)
+            }),
             Box::new(|part, captures, fonts| part.set_bold(true)),
             Box::new(|part, captures, fonts| part.set_italic(true)),
-            Box::new(|part, captures, fonts| part.set_color(format!("{};{};{};1.0",captures.name("r").unwrap().as_str(),captures.name("g").unwrap().as_str(),captures.name("b").unwrap().as_str()))),
+            Box::new(|part, captures, fonts| {
+
+                let error_msg = (regex_error_fn)("Invalid or missing color tuple in color redefinition!");
+
+                let r = captures.name("r").ok_or(error_msg.clone())?.as_str();
+                let g = captures.name("g").ok_or(error_msg.clone())?.as_str();
+                let b = captures.name("b").ok_or(error_msg)?.as_str();
+
+                part.set_color(format!("{};{};{};1.0",r,g,b))
+            }),
         ];
 
         let mut vec = vec![ TextPart::Text { text: string.as_str().into(), bold, italic, color, size: base_size, font: font_list.get(base_font.as_ref()).unwrap() } ];
@@ -358,10 +457,10 @@ impl<'a> Text<'a> {
                         let mut last_match_end: usize = 0;
                         for text_captures in regex.captures_iter(text) {
                             let text_match = text_captures.get(0).unwrap();
-                            let text_content = text_captures.name("content").unwrap();
+                            let text_content = text_captures.name("content").expect("No content matched! This shouldn't happen!");
                             construct_vec.push(TextPart::Text { text: text[last_match_end..text_match.start()].into(), bold, italic, color: color.clone(), size: size.clone(), font });
                             let mut modified = TextPart::Text { text: text[text_content.start()..text_content.end()].into(), bold, italic, color: color.clone(), size: size.clone(), font };
-                            (regex_fns[i])(&mut modified, &text_captures, font_list);
+                            (regex_fns[i])(&mut modified, &text_captures, font_list)?;
                             construct_vec.push(modified);
                             last_match_end = text_match.end();
                         }
@@ -382,9 +481,13 @@ impl<'a> Text<'a> {
                     while placeholders_exist {
                         if let Some(capture) = PLACEHOLDER_REGEX.captures_iter(leftover_text.clone().leak()).next() {
                             let placeholder_match = capture.get(0).unwrap();
-                            let index = capture.name("name").unwrap().as_str();
+                            let index = capture.name("name").expect("No placeholder name matched! This shouldn't happen!").as_str();
                             let padchar = capture.name("padchar").map(|m| m.as_str()).unwrap_or(" ");
-                            let padamount = capture.name("padamount").map(|m| m.as_str().parse::<i32>().unwrap()).unwrap_or(0);
+                            let padamount = capture.name("padamount").map(|m| {
+                                m.as_str().parse::<i32>().map_err(|_| {
+                                    (regex_error_fn)("Invalid placeholder padding amount!")
+                                })
+                            }).unwrap_or(Ok(0))?;
                             let paddir = capture.name("paddir").map(|m| m.as_str()).unwrap_or("<");
                             
                             let (before, after) = (&leftover_text[..placeholder_match.start()], &leftover_text[placeholder_match.end()..]);
@@ -443,39 +546,30 @@ impl<'a> Text<'a> {
             _ => true
         }).collect();
 
-        vec
+        Ok(vec)
     }
 
-    pub fn new<PosStr, TextStr, WidthStr, SizeStr, AlignStr, ColStr, TxtAlignStr>(
-        pos: PosStr,
+    pub fn new<TextStr, TxtAlignStr>(
+        base: BaseProperties<'a>,
         text: Vec<TextStr>,
-        wrapping_width: WidthStr,
-        size: SizeStr,
-        alignment: AlignStr,
-        color: ColStr,
         base_font: String,
         font_list: &'static HashMap<String, RefCell<TextFont>>,
         placeholders: HashMap<String, TextPlaceholderExpr<'a>>,
         text_alignment: TxtAlignStr
-    ) -> Text<'a>
+    ) -> Result<Text<'a>, PropertyError>
     where
-        PosStr: Into<String>,
         TextStr: Into<String>,
-        WidthStr: Into<String>,
-        SizeStr: Into<String>,
-        AlignStr: Into<String>,
-        TxtAlignStr: Into<String>,
-        ColStr: Into<String> {
+        TxtAlignStr: Into<String>, {
         let mut text_parts = Vec::new();
 
-        let size_expr = util::res_dependent_expr(<SizeStr as Into<String>>::into(size), &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased);
+        let size_expr = &base.size.list[1];
 
-        let col_expr: util::ExprVector<4> = util::parse_expression_list(<ColStr as Into<String>>::into(color), &util::DEFAULT_CONTEXT).try_into().unwrap();
+        let col_expr = &base.color;
 
         for into_string in text {
             let string: String = into_string.into();
 
-            for part in Text::parse(string, size_expr.clone(), base_font.clone(), false, false, col_expr.clone(), font_list) {
+            for part in Text::parse(string, size_expr.clone(), base_font.clone(), false, false, col_expr.clone(), font_list)? {
                 text_parts.push(part);
             }
 
@@ -485,14 +579,20 @@ impl<'a> Text<'a> {
         // DEBUG: Check if the parsed text actually got parsed correctly
         // println!("{:?}",text_parts);
 
-        Text {
-            pos: util::parse_expression_list(<PosStr as Into<String>>::into(pos), &util::DEFAULT_CONTEXT).try_into().unwrap(),
+        // Text {
+        //     pos: util::parse_expression_list(<PosStr as Into<String>>::into(pos), &util::DEFAULT_CONTEXT).try_into().unwrap(),
+        //     text: text_parts,
+        //     wrapping_width: util::res_dependent_expr(<WidthStr as Into<String>>::into(wrapping_width), &util::DEFAULT_CONTEXT, util::ResExprType::WidthBased),
+        //     size: size_expr,
+        //     alignment: <AlignStr as Into<String>>::into(alignment).into(),
+        //     text_alignment: format!("TOP_{}",<TxtAlignStr as Into<String>>::into(text_alignment)).into(),
+        //     placeholders, }
+        Ok(Text {
+            base,
             text: text_parts,
-            wrapping_width: util::res_dependent_expr(<WidthStr as Into<String>>::into(wrapping_width), &util::DEFAULT_CONTEXT, util::ResExprType::WidthBased),
-            size: size_expr,
-            alignment: <AlignStr as Into<String>>::into(alignment).into(),
-            text_alignment: format!("TOP_{}",<TxtAlignStr as Into<String>>::into(text_alignment)).into(),
-            placeholders, }
+            text_alignment: format!("TOP_{}",<TxtAlignStr as Into<String>>::into(text_alignment)).try_into()?,
+            placeholders
+        })
     }
 
     fn pad_num<'b>(num: f64, pad_amount: i8, pad_char: &str, pad_dir_str: &str) -> &'b str {
@@ -512,16 +612,28 @@ impl<'a> Text<'a> {
 }
 
 impl<'a> Renderable for Text<'a> {
+    fn get_base_properties(&self) -> &BaseProperties<'_> {
+        &self.base
+    }
+
+    fn copy<'b>(&self) -> Box<dyn Renderable + 'b> {
+        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable + 'a) as *mut (dyn Renderable + 'a);
+        unsafe {
+            let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
+            Box::from_raw(result_ptr)
+        }
+    }
+
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
         const ITALIC_ADVANCE_FAC: f64 = 0.15;
 
         let view_size = context.get_view_size();
-        let max_width = self.wrapping_width.evaluate(view_size[0], view_size[1], time);
-        let mut current_pos = self.pos.evaluate_tuple(view_size[0], view_size[1], time);
-        let alignment: (f64, f64) = self.alignment.into();
+        let max_width = self.base.size.list[0].evaluate(view_size[0], view_size[1], time);
+        let mut current_pos = self.base.pos.evaluate_tuple(view_size[0], view_size[1], time);
+        let alignment: (f64, f64) = self.base.alignment.into();
         let text_align: f64 = self.text_alignment.multipliers().0;
         
-        let default_size = self.size.evaluate(view_size[0], view_size[1], time);
+        let default_size = self.base.size.list[1].evaluate(view_size[0], view_size[1], time);
 
         let mut height = 0.0;
         let mut line_widths: Vec<f64> = Vec::with_capacity(self.text.len()/2+4);
@@ -624,7 +736,6 @@ impl<'a> Renderable for Text<'a> {
         let starting_pos = (current_pos.0 - max_width*alignment.0, current_pos.1 - height*alignment.1);
         current_pos = (starting_pos.0 + (max_width - line_widths[current_line])*text_align, starting_pos.1);
 
-
         // Draw the text
         for part in self.text.iter() {
             match part {
@@ -723,33 +834,41 @@ use graphics::Image as ImageRect;
 use opengl_graphics::Texture;
 use std::path::Path;
 
+use std::sync::RwLock;
+static IMAGE_TEXTURES: RwLock<Vec<Texture>> = RwLock::new(Vec::new());
+
+#[derive(Clone)]
 pub struct Image<'a> {
-    pos: util::ExprVector<'a, 2>,
-    size: util::ExprVector<'a, 2>,
-    alignment: util::Alignment,
+    base: BaseProperties<'a>,
     texture_path: String,
-    texture: Texture
+    texture: usize
 }
 
 impl<'a> Debug for Image<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Image{{ pos: {:?}, size: {:?}, alignment: {:?}, texture: {} }}",self.pos,self.size,self.alignment,self.texture_path)
+        write!(f, "Image{{ pos: {:?}, size: {:?}, alignment: {:?}, texture: {} }}",self.base.pos,self.base.size,self.base.alignment,self.texture_path)
     }
 }
 
 impl<'a> Image<'a> {
-    pub fn new<P: AsRef<Path>, PosStr, SizeStr, AlignStr>(path: P, pos: PosStr, size: SizeStr, alignment: AlignStr) -> Self
-    where PosStr: Into<String>, SizeStr: Into<String>, AlignStr: Into<String> {
+    pub fn new<P: AsRef<Path>>(base: BaseProperties<'a>, path: P) -> Result<Self, PropertyError> {
         use crate::render::sprite::DEFAULT_TEXTURE_SETTINGS;
 
-        let texture_path = path.as_ref().to_str().unwrap().to_owned();
-        let texture = Texture::from_path(path, &DEFAULT_TEXTURE_SETTINGS).unwrap();
+        let texture_path = path.as_ref().to_str()
+            .ok_or(PropertyError::SyntaxError(
+                "Image".to_owned(),
+                "path".to_owned(),
+                Some("Path isn't valid unicode!".to_owned())))?
+            .to_owned();
+        let texture = Texture::from_path(path, &DEFAULT_TEXTURE_SETTINGS)
+            .map_err(|e|PropertyError::SyntaxError(
+                "Image".to_owned(),
+                "path".to_owned(),
+                Some(format!("Loading image at path {texture_path} failed: {e}"))))?;
+        
+        IMAGE_TEXTURES.write().unwrap().push(texture);
 
-        let parsed_pos = util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).try_into().unwrap();
-        let parsed_size = util::parse_expression_list(size, &util::DEFAULT_CONTEXT).try_into().unwrap();
-        let parsed_alignment = <AlignStr as Into<String>>::into(alignment).into();
-
-        Self { pos: parsed_pos, size: parsed_size, alignment: parsed_alignment, texture, texture_path }
+        Ok(Self { base, texture: IMAGE_TEXTURES.read().unwrap().len()-1, texture_path })
     }
 }
 
@@ -758,12 +877,28 @@ impl<'a> Renderable for Image<'a> {
         use graphics::DrawState;
 
         let view_size = context.get_view_size();
-        let pos_eval = self.pos.evaluate_tuple(view_size[0], view_size[1], time);
-        let size_eval = self.size.evaluate_tuple(view_size[0], view_size[1], time);
-        let alignment: (f64, f64) = self.alignment.into();
+        let pos_eval = self.base.pos.evaluate_tuple(view_size[0], view_size[1], time);
+        let size_eval = self.base.size.evaluate_tuple(view_size[0], view_size[1], time);
+        let col_eval = self.base.color.evaluate_arr(view_size[0], view_size[1], time).map(|f|f as f32);
+        let alignment: (f64, f64) = self.base.alignment.into();
 
-        let rect = ImageRect::new().rect([pos_eval.0-size_eval.0*alignment.0,pos_eval.1-size_eval.1*alignment.1,size_eval.0,size_eval.1]);
+        let rect = ImageRect::new().rect([pos_eval.0-size_eval.0*alignment.0,pos_eval.1-size_eval.1*alignment.1,size_eval.0,size_eval.1]).color(col_eval);
 
-        rect.draw(&self.texture, &DrawState::default(), context.transform, opengl);
+        let lock = IMAGE_TEXTURES.read().unwrap();
+        let texture = lock.get(self.texture).unwrap();
+
+        rect.draw(texture, &DrawState::default(), context.transform, opengl);
+    }
+
+    fn get_base_properties(&self) -> &BaseProperties<'_> {
+        &self.base
+    }
+
+    fn copy<'b>(&self) -> Box<dyn Renderable + 'b> {
+        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable + 'a) as *mut (dyn Renderable + 'a);
+        unsafe {
+            let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
+            Box::from_raw(result_ptr)
+        }
     }
 }
