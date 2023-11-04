@@ -61,7 +61,7 @@ impl AppData {
         // Create an instance of a parser (which parser gets instantiated depends on the file extension)
         let mut parser = parse::get_parser(filepath.as_str()).expect("No parser found for file type!");
 
-        let document_fonts = parser.parse_fonts(filecontents.as_str()).unwrap();
+        let document_fonts = parser.parse_fonts(filecontents.as_str()).unwrap_or_else(|e| { parser.handle_error(e); unreachable!() });
         FONTS.set({
             let mut map = HashMap::new();
 
@@ -85,7 +85,7 @@ impl AppData {
             AssumeThreadSafe(map)
         }).ok().expect("error initializing fonts");
 
-        let document = parser.parse(filecontents.as_str()).unwrap();
+        let document = parser.parse(filecontents.as_str()).unwrap_or_else(|e| { parser.handle_error(e); unreachable!() });
 
         let mut presentation = presentation::Presentation::new();
 

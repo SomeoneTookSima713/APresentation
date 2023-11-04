@@ -14,7 +14,7 @@ pub const FONT_SCALE: (f32, f32, f32) = (30.0, 240.0, 10.0);
 
 const MAX_FONT_COUNT: usize = ((FONT_SCALE.1 - FONT_SCALE.0) / FONT_SCALE.2) as usize + 1;
 
-pub const ITALIC_FAC: f64 = 0.2;
+pub const ITALIC_FAC: f64 = 0.15;
 
 // #[derive(Clone)]
 pub struct Font {

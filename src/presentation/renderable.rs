@@ -519,6 +519,34 @@ impl<'a> Text<'a> {
         }
         vec = std::mem::replace(&mut construct_vec, Vec::new());
 
+        // Add tabs
+        construct_vec = Vec::new();
+        for text_part in vec.into_iter() {
+            match text_part {
+                TextPart::Text { text, bold, italic, color, size, font } => {
+                    let mut new_text_parts = vec![text.clone()];
+                    while new_text_parts[new_text_parts.len()-1].find('\t').is_some() && new_text_parts[new_text_parts.len()-1].len()>1 {
+                        let i = new_text_parts[new_text_parts.len()-1].find('\t').unwrap();
+                        let txt = new_text_parts.remove(new_text_parts.len()-1);
+                        new_text_parts.push(txt[..i].to_owned());
+                        new_text_parts.push(txt[i..i].to_owned());
+                        if txt.len()>=i {
+                            new_text_parts.push(txt[i+1..].to_owned());
+                        }
+                    }
+                    for txt in new_text_parts.into_iter() {
+                        if &txt == "\t" {
+                            construct_vec.push(TextPart::Tab);
+                        } else {
+                            construct_vec.push(TextPart::Text { text: txt, bold, italic, color: color.clone(), size: size.clone(), font });
+                        }
+                    }
+                },
+                _ => construct_vec.push(text_part)
+            }
+        }
+        vec = std::mem::replace(&mut construct_vec, Vec::new());
+
         // Split the text parts at every space or hyphen to allow for text wrapping.
         for c in [' ', '-'] {
             construct_vec = Vec::new();
@@ -625,7 +653,7 @@ impl<'a> Renderable for Text<'a> {
     }
 
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
-        const ITALIC_ADVANCE_FAC: f64 = 0.15;
+        const ITALIC_ADVANCE_FAC: f64 = 0.10;
 
         let view_size = context.get_view_size();
         let max_width = self.base.size.list[0].evaluate(view_size[0], view_size[1], time);
@@ -645,8 +673,9 @@ impl<'a> Renderable for Text<'a> {
         for part in self.text.iter() {
             match part {
                 TextPart::Tab => {
-                    if curr_width+default_size*4.0<=max_width {
-                        curr_width += default_size*4.0;
+                    let size_incs = default_size*12.0;
+                    if (curr_width/size_incs).ceil()*size_incs<=max_width {
+                        curr_width = (curr_width/size_incs).ceil()*size_incs;
                     }
                 },
                 TextPart::NewLine => {
@@ -740,7 +769,16 @@ impl<'a> Renderable for Text<'a> {
         for part in self.text.iter() {
             match part {
                 TextPart::Tab => {
-                    current_pos.0 += default_size*4.0;
+                    // current_pos.0 += default_size*4.0;
+                    /*
+                    if (curr_width/size_incs).ceil()*size_incs<=max_width {
+                        curr_width = (curr_width/size_incs).ceil()*size_incs;
+                    }
+                    */
+                    let size_incs = default_size*12.0;
+                    if (current_pos.0/size_incs).ceil()*size_incs - starting_pos.0 <= max_width {
+                        current_pos.0 = (current_pos.0/size_incs).ceil()*size_incs;
+                    }
                 },
                 TextPart::NewLine => {
                     current_pos.0 = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
@@ -766,7 +804,8 @@ impl<'a> Renderable for Text<'a> {
                     let mut part_size = font_instance.size(text.clone(), part_font_size);
 
                     if *italic {
-                        part_size.0 += part_font_size * ITALIC_ADVANCE_FAC;
+                        // part_size.0 += part_font_size * ITALIC_ADVANCE_FAC/2.0;
+                        current_pos.0 += part_font_size * ITALIC_ADVANCE_FAC;
                     }
 
                     if current_pos.0 + part_size.0 - starting_pos.0 > max_width {

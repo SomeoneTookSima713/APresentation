@@ -13,17 +13,54 @@ use super::{ Parser, SlideData };
 
 pub struct JSONParser;
 impl Parser for JSONParser {
+    type Error = deser_hjson::Error;
 
-    fn parse<'a>(&mut self, contents: &'a str) -> Result<Vec<SlideData>, Box<dyn Debug>> {
-        let document: Document = deser_hjson::from_str(contents).map_err(|e| Box::new(e) as Box<dyn Debug>)?;
+    fn parse<'a>(&mut self, contents: &'a str) -> Result<Vec<SlideData>, Self::Error> {
+        let document: Document = deser_hjson::from_str(contents)?;
 
         Ok(document.0)
     }
 
-    fn parse_fonts<'a>(&mut self, contents: &'a str) -> Result<HashMap<String, (String, String)>, Box<dyn Debug>> {
-        let fonts: DocumentFonts = deser_hjson::from_str(contents).map_err(|e| Box::new(e) as Box<dyn Debug>)?;
+    fn parse_fonts<'a>(&mut self, contents: &'a str) -> Result<HashMap<String, (String, String)>, Self::Error> {
+        let fonts: DocumentFonts = deser_hjson::from_str(contents)?;
 
         Ok(fonts.0)
+    }
+
+    fn handle_error(&self, err: Self::Error) {
+        use deser_hjson::{ Error, ErrorCode };
+        match err {
+            Error::Io(e) => panic!("\nIO error:\n\t{e}\n"),
+            Error::RawSerde(s) => panic!("\nParsing Error:\n\t{}\n",s.replace("\n", "\n\t")),
+            Error::Syntax { line, col, code, at } => {
+                let codestr = match code {
+                    ErrorCode::Eof => "Unexpected end of file!",
+                    ErrorCode::ExpectedArray => "Expected an array!",
+                    ErrorCode::ExpectedArrayComma => "Expected comma to seperate elements of array!",
+                    ErrorCode::ExpectedArrayEnd => "Expected end of array!",
+                    ErrorCode::ExpectedBoolean => "Expected a boolean!",
+                    ErrorCode::ExpectedEnum => "Expected an enum!",
+                    ErrorCode::ExpectedF32 | ErrorCode::ExpectedF64 => "Expected a float!",
+                    ErrorCode::ExpectedI16 | ErrorCode::ExpectedI32 | ErrorCode::ExpectedI64 | ErrorCode::ExpectedI8 | ErrorCode::ExpectedU16 |
+                    ErrorCode::ExpectedU32 | ErrorCode::ExpectedU64 | ErrorCode::ExpectedU8 | ErrorCode::ExpectedInteger => "Expected an integer!",
+                    ErrorCode::ExpectedMap => "Expected a map!",
+                    ErrorCode::ExpectedMapColon => "Expected a colon in map!",
+                    ErrorCode::ExpectedMapComma => "Expected a comma to seperate elements of map!",
+                    ErrorCode::ExpectedMapEnd => "Expected end of map!",
+                    ErrorCode::ExpectedNull => "Expected null!",
+                    ErrorCode::ExpectedPositiveInteger => "Expected a positive integer!",
+                    ErrorCode::ExpectedSingleChar => "Expected a singular character",
+                    ErrorCode::ExpectedString => "Expected a string",
+                    ErrorCode::InvalidEscapeSequence => "Invalid escape sequence!",
+                    ErrorCode::TrailingCharacters => "Unexpected trailing characters!",
+                    ErrorCode::UnexpectedChar => "Unexpected character!",
+                };
+                panic!("\nHJSON Syntax error at Line {line}, Column {col}:\n\t{at}\n\t^ {codestr}\n")
+            },
+            Error::Utf8(e) => panic!("\nUTF8 error:\n\t{e}\n"),
+            Error::Serde { line, col, message } => panic!("\nSerde error at Line {line}, Column {col}:\n\t{}\n", message.replace("\n", "\n\t")),
+            _ => panic!("\nUnknown error:\n\t{err}\n")
+        }
     }
 }
 
@@ -307,6 +344,59 @@ use crate::presentation::util::PropertyError;
 #[derive(Debug)]
 pub struct Document(pub Vec<SlideData>);
 impl Document {
+    fn parse_base_properties<'a, E: serde::de::Error>(map: &HashMap<String, JSONValue>, renderable_type: String) -> Result<BaseProperties<'a>, E> {
+        let err = serde::de::Error::custom;
+
+        let merr = |renderable: String, property: Option<String>, desc: String| move |e: PropertyError|{
+            let underscore = "_".to_owned();
+            let (r, p, desc) = e.syntax_error(renderable, property.as_ref().unwrap_or(&underscore).clone(), desc);
+
+            if property.is_some() {
+                serde::de::Error::custom(format!("error while initializing property {p} of {r}: {desc}").as_str())
+            } else {
+                serde::de::Error::custom(format!("error while creating {r}: {desc}").as_str())
+            }
+        };
+
+        let pos: String = get_value_alternates(map, vec!["pos", "position"])?.clone().try_into().map_err(|_|err("position needs to be a string"))?;
+        let size: String = get_value_alternates(map, vec!["size"])?.clone().try_into().map_err(|_|err("size needs to be a string"))?;
+        let col: String = {
+            let str: String = get_value_alternates(map, vec!["col", "color", "colour"])?.clone().try_into().map_err(|_|err("color needs to be a string"))?;
+            if str.starts_with('#') {
+                // If the color string starts with a '#', we don't have a pair of expressions, but
+                // a hexadecimal color value instead.
+
+                // Do some rudimentary checks if the format is correct (as to not throw confusing
+                // error messages at the user)
+                if str.len()!=7 && str.len()!=9 {
+                    // The string needs to be of length 7 (#RRGGBB) or 9 (#RRGGBBAA), otherwise it
+                    // is invalid
+                    Err(err("invalid hexadecimal color format"))?;
+                }
+
+                let red_hex: String = str[1..3].to_lowercase();
+                let green_hex: String = str[3..5].to_lowercase();
+                let blue_hex: String = str[5..7].to_lowercase();
+                let alpha_hex: String = if str.len()==9 { str[7..9].to_lowercase() } else { "ff".to_owned() };
+
+                let red = u8::from_str_radix(&red_hex, 16).map_err(|_|err("invalid hexadecimal color value"))? as f32;
+                let green = u8::from_str_radix(&green_hex, 16).map_err(|_|err("invalid hexadecimal color value"))? as f32;
+                let blue = u8::from_str_radix(&blue_hex, 16).map_err(|_|err("invalid hexadecimal color value"))? as f32;
+                let alpha = u8::from_str_radix(&alpha_hex, 16).map_err(|_|err("invalid hexadecimal color value"))? as f32;
+
+                format!("{};{};{};{}",red/255.0,green/255.0,blue/255.0,alpha/255.0)
+            } else {
+                // If the color string doesn't start with a '#', we do have a pair of expressions.
+
+                str
+            }
+        };
+
+        let alignment: String = get_value_alternates(map, vec!["align", "alignment"])?.clone().try_into().map_err(|_|err("alignment needs to be a string"))?;
+
+        BaseProperties::new(pos, size, col, alignment).map_err(merr(renderable_type, None, "Invalid alignment or invalid expression count!".to_owned()))
+    }
+
     /// Parses the document to get a [`Vec`] of [`SlideData`]s
     pub fn slides_from_json<E: serde::de::Error>(data: &HashMap<String, JSONValue>) -> Result<SlideData, E> {
         // Helper function for creating a general error message for the background being invalid.
@@ -348,18 +438,12 @@ impl Document {
             // More complex case: Any renderable object
             JSONValue::Object(hashmap) => {
 
-                // Get the default properties of a renderable.
-                let pos: String = get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into().map_err(|_|err("position needs to be a string"))?;
-                let size: String = get_value_alternates(hashmap, vec!["size", "height"])?.clone().try_into().map_err(|_|err("size needs to be a string"))?;
-                let col: String = get_value_alternates(hashmap, vec!["col", "color", "colour"])?.clone().try_into().map_err(|_|err("color needs to be a string"))?;
-                let alignment: String = get_value_alternates(hashmap, vec!["align", "alignment"])?.clone().try_into().map_err(|_|err("alignment needs to be a string"))?;
-
                 // Get the type of the Renderable.
                 //   Used for error messages and actually constructing a Renderable
                 let renderable_type: String = hashmap.get("type").ok_or(err("required field \"type\" missing"))?.clone()
                     .try_into().map_err(|_|err("field \"type\" needs to be a string"))?;
 
-                let base = BaseProperties::new(pos, size, col, alignment).map_err(merr(renderable_type.clone(), None, "Invalid alignment or invalid expression count!".to_owned()))?;
+                let base = Self::parse_base_properties(hashmap, renderable_type.clone())?;
 
                 let map = hashmap.clone();
 
@@ -391,18 +475,12 @@ impl Document {
                 for (i, renderable_json) in vec.iter().enumerate() {
                     let map: HashMap<String, JSONValue> = renderable_json.clone().try_into().map_err(|_|serde::de::Error::custom("field \"content\" must be an array of objects"))?;
 
-                    // Get the default properties of a renderable.
-                    let pos: String = get_value_alternates(&map, vec!["pos", "position"])?.clone().try_into().map_err(|_|err("position needs to be a string"))?;
-                    let size: String = get_value_alternates(&map, vec!["size"])?.clone().try_into().map_err(|_|err("size needs to be a string"))?;
-                    let col: String = get_value_alternates(&map, vec!["col", "color", "colour"])?.clone().try_into().map_err(|_|err("color needs to be a string"))?;
-                    let alignment: String = get_value_alternates(&map, vec!["align", "alignment"])?.clone().try_into().map_err(|_|err("alignment needs to be a string"))?;
-
                     // Get the type of the Renderable.
                     //   Used for error messages and actually constructing a Renderable
                     let renderable_type: String = map.get("type").ok_or(err("required field \"type\" missing"))?.clone()
                         .try_into().map_err(|_|err("field \"type\" needs to be a string"))?;
 
-                    let base = BaseProperties::new(pos, size, col, alignment).map_err(merr(renderable_type.clone(), None, "Invalid alignment or invalid expression count!".to_owned()))?;
+                    let base = Self::parse_base_properties(&map, renderable_type.clone())?;
 
                     // Try to construct a Renderable object based on the specified type.
                     //   Errors if the specified type doesn't exist, the field is invalid or the

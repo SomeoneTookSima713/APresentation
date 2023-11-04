@@ -1,0 +1,41 @@
+{
+    fonts: {},
+    slides: [
+        {
+            background: [255,255,255],
+            content: [
+                {
+                    type: "RoundedRect",
+                    pos: "50%;50%-h+h*easeOutPow(t-1,3)",
+                    size: "100%-0.36*h;82%",
+                    alignment: "MID_CENTERED",
+                    color: "#edf2fb",
+                    corner_rounding: "2%",
+                    z: 1
+                },
+                {
+                    type: "Text",
+                    pos: "0.22*h;11%-h+h*easeOutPow(t-1,3)",
+                    size: "100%-0.44*h;24*h/720",
+                    alignment: "TOP_LEFT",
+                    text_alignment: "LEFT",
+                    color: "#202020",
+                    font: "Default",
+                    text: [
+                        "~48*h/720~Hi there!~~",
+                        "~28*h/720~ ~~",
+                        "This is an example presentation. In here you'll see some common things you can do with currently existing Renderable objects! (if you don't yet know what I mean by \"Renderable object\", you should check out the wiki)",
+                        " ",
+                        "Here are all the controls you need to know to navigate the presentation:",
+                        " ",
+                        "*Arrow keys* or *A* and *D*:  Switch between different slides",
+                        "*F11*:  Switch between windowed and fullscreen mode",
+                        "~80*h/720~ ~~",
+                        "That's it for now. Enjoy looking through the different slides!"
+                    ],
+                    z: 2
+                }
+            ]
+        }
+    ]
+}

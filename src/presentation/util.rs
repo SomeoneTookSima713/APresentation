@@ -354,7 +354,26 @@ pub fn res_dependent_expr<'a, S: Into<String>>(expr: S, context: &'a Context, ex
 
     // Parse the expression and bind it to a function with three arguments
     // (the window's dimensions and time)
-    let parsed_expr = string.clone().parse::<Expr>().unwrap();
+    let parsed_expr = string.clone().parse::<Expr>().map_err(|e| {
+        let errdesc: String = match e {
+            Error::ParseError(errtype) => {
+                match errtype {
+                    ParseError::MissingArgument => format!("Expression Parsing error: Missing argument at end of the expression!"),
+                    ParseError::MissingRParen(n) => format!("Expression Parsing error: {n} missing right parentheses!"),
+                    ParseError::UnexpectedToken(n) => {
+                        let mut indicatorstr: String = String::with_capacity(string.len()+4);
+                        for _ in 0..n {
+                            indicatorstr.push(' ');
+                        }
+                        indicatorstr.push_str("^ Here");
+                        format!("Expression Parsing error: Unexpected token at position {n}:\n\t{}\n\t{indicatorstr}",string.clone())
+                    }
+                }
+            },
+            _ => format!("{e}")
+        };
+        PropertyError::SyntaxError(EMPTY.clone(), EMPTY.clone(), Some(errdesc))
+    })?;
     match parsed_expr.bind3_with_context(context, "w", "h", "t") {
         Ok(e) => Ok(ResolutionDependentExpr { expr: Box::new(e), base_string: string, base_context: context, base_expr_type: expr_type }),
         Err(err) => {
