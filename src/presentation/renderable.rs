@@ -398,17 +398,17 @@ impl<'a> Text<'a> {
             static ref BOLD_REGEX: Regex = Regex::new(r"\*\*(?<content>.+?)\*\*").unwrap();
             static ref ITALIC_REGEX: Regex = Regex::new(r"\*(?<content>.+?)\*").unwrap();
             static ref FONT_REGEX: Regex = Regex::new(r"_(?<font>.+?)_(?<content>.+?)__").unwrap();
-            static ref COLOR_REGEX: Regex = Regex::new(r"`(?<r>[^;`]+);\s*(?<g>[^;`]+);\s*(?<b>[^;`]+)`(?<content>.+?)``").unwrap();
+            static ref COLOR_REGEX: Regex = Regex::new(r"`(?<r>[^;`]+);\s*(?<g>[^;`]+);\s*(?<b>[^;`]+)(;\s*(?<a>[^;`]+))?`(?<content>.+?)``").unwrap();
             static ref SIZE_REGEX: Regex = Regex::new(r"~(?<size>[^~]+?)~(?<content>.+?)~~").unwrap();
         }
         static REGEXES: OnceLock<[Regex; 5]> = OnceLock::new();
         if REGEXES.get().is_none() {
             REGEXES.set([
                 SIZE_REGEX.clone(),
+                COLOR_REGEX.clone(),
                 FONT_REGEX.clone(),
                 BOLD_REGEX.clone(),
                 ITALIC_REGEX.clone(), 
-                COLOR_REGEX.clone(), 
             ]).map_err(|_| "error initializing regex list").unwrap();
         }
 
@@ -425,6 +425,24 @@ impl<'a> Text<'a> {
                 part.set_size(size)
             }),
             Box::new(|part, captures, fonts| {
+
+                let error_msg = (regex_error_fn)("Invalid or missing color tuple in color redefinition!");
+
+                let alpha = match part {
+                    TextPart::Text { text: _, bold: _, italic: _, color, size: _, font: _ } => {
+                        color.list[3].base_string.clone()
+                    },
+                    _ => "1.0".to_owned()
+                };
+
+                let r = captures.name("r").ok_or(error_msg.clone())?.as_str();
+                let g = captures.name("g").ok_or(error_msg.clone())?.as_str();
+                let b = captures.name("b").ok_or(error_msg)?.as_str();
+                let a = captures.name("a").map(|m|m.as_str()).unwrap_or(alpha.as_str());
+
+                part.set_color(format!("{};{};{};{}",r,g,b,a))
+            }),
+            Box::new(|part, captures, fonts| {
                 let f = fonts
                     .get(captures.name("font")
                         .ok_or((regex_error_fn)("No font name in font redefinition!"))?
@@ -434,16 +452,6 @@ impl<'a> Text<'a> {
             }),
             Box::new(|part, captures, fonts| part.set_bold(true)),
             Box::new(|part, captures, fonts| part.set_italic(true)),
-            Box::new(|part, captures, fonts| {
-
-                let error_msg = (regex_error_fn)("Invalid or missing color tuple in color redefinition!");
-
-                let r = captures.name("r").ok_or(error_msg.clone())?.as_str();
-                let g = captures.name("g").ok_or(error_msg.clone())?.as_str();
-                let b = captures.name("b").ok_or(error_msg)?.as_str();
-
-                part.set_color(format!("{};{};{};1.0",r,g,b))
-            }),
         ];
 
         let mut vec = vec![ TextPart::Text { text: string.as_str().into(), bold, italic, color, size: base_size, font: font_list.get(base_font.as_ref()).unwrap() } ];

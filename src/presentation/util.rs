@@ -163,6 +163,7 @@ impl DefaultContext {
                 isEqual(a,b)                 - returns 1 if a and b are equal, otherwise returns 0
                 isGreater(a,b)               - returns 1 if a is greater than b, otherwise returns 0
                 isLess(a,b)                  - returns 1 if a is less than b, otherwise returns 0
+                mod(a,b)                     - returns the the remainder of the division of a by b, also called the modulo of a and b
             */
             
             // Easing functions
@@ -181,6 +182,7 @@ impl DefaultContext {
             ctx.func2("isEqual",|a,b|match a==b { true=>1.0, false=>0.0 });
             ctx.func2("isGreater",|a,b|match a>b { true=>1.0, false=>0.0 });
             ctx.func2("isLess",|a,b|match a<b { true=>1.0, false=>0.0 });
+            ctx.func2("mod", |a,b|a%b);
 
             ctx
         }))
@@ -203,22 +205,22 @@ pub static DEFAULT_CONTEXT: DefaultContext = DefaultContext::new();
 /// Allows the usage of a percent-sign inside of expressions.
 pub struct ResolutionDependentExpr<'a> {
     /// The function for evaluating the expression's value.
-    pub(self) expr: Box<dyn Fn(f64, f64, f64) -> f64 + 'a>,
+    pub(crate) expr: Box<dyn Fn(f64, f64, f64) -> f64 + 'a>,
     /// The string the expression was parsed from.
     /// 
     /// Used for debugging.
-    pub(self) base_string: String,
+    pub(crate) base_string: String,
     /// The context that was used to construct the evaluation function.
     /// 
     /// Used to recreate the function when cloning.
-    pub(self) base_context: &'a Context<'a>,
+    pub(crate) base_context: &'a Context<'a>,
     /// The type of the expression.
     /// 
     /// Decides what the percent sign (`%`) gets replaced with.
     /// 
     /// When this value equals [`ResExprType::WidthBased`], any percent sign gets replaced with `/100*w`.
     /// When it equals [`ResExprType::HeightBased`], percent signs get replaced with `/100*h`.
-    pub(self) base_expr_type: ResExprType
+    pub(crate) base_expr_type: ResExprType
 }
 
 impl<'a> Clone for ResolutionDependentExpr<'a> {

@@ -592,6 +592,8 @@ type FnRenderableParse<'a> = Box<dyn Fn(HashMap<String, JSONValue>, BaseProperti
 const RENDERABLE_FUNCS: Lazy<HashMap<String, FnRenderableParse>> = Lazy::new(|| {
     let mut map = HashMap::new();
     map.insert("ColoredRect".to_owned(), ColoredRect::renderable_func::<deser_hjson::Error>());
+    map.insert("Rect".to_owned(), ColoredRect::renderable_func::<deser_hjson::Error>());
+    
     map.insert("RoundedRect".to_owned(), RoundedRect::renderable_func::<deser_hjson::Error>());
     map.insert("Text".to_owned(), Text::renderable_func::<deser_hjson::Error>());
     map.insert("Image".to_owned(), Image::renderable_func::<deser_hjson::Error>());

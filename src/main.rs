@@ -25,7 +25,7 @@ const APPLICATION_VERSION: &'static str = include_str!("version");
 fn run_viewer(args: Vec<String>) -> Result<(), Box<dyn Debug>> {
     let mut application = app::Application::create(OpenGL::V3_2);
 
-    let mut window: PistonWindow = application.init(format!("APresentation - {}",APPLICATION_VERSION), (640,480), false, true, true, args[2].clone());
+    let mut window: PistonWindow = application.init(format!("APresentation - {}",APPLICATION_VERSION), (1280,720), false, true, true, args[2].clone());
 
     let mut fullscreen;
 

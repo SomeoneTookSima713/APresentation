@@ -4,6 +4,25 @@
         {
             background: [255,255,255],
             content: [
+                /* UNCOMMENT THIS
+                // Short tutorial:
+                // Replace the underscores in the string of the 'path' property
+                // with your image's file name (including extenstion), then
+                // delete every line beginning with a slash and a star,
+                // a star and a slash or two slashes (at least those in the
+                // direct vicinity of the Image-object).
+                // After doing that, you should see your image on the first
+                // slide in the top left corner of your screen.
+                {
+                    type: "Image",
+                    pos: "0;0",
+                    size: "50%;50%",
+                    alignment: "TOP_LEFT",
+                    color: "#ffffff",
+                    path: "____",
+                    z: 999999
+                },
+                */
                 {
                     type: "RoundedRect",
                     pos: "50%;50%-h+h*easeOutPow(t-1,3)",
@@ -35,6 +54,252 @@
                     ],
                     z: 2
                 }
+            ]
+        },
+        {
+            background: [255,255,255],
+            content: [
+                // Old
+                {
+                    type: "RoundedRect",
+                    pos: "50%;50%+(t*3.5-1)^2*h/30-h*0.033",
+                    size: "100%-0.36*h;82%",
+                    alignment: "MID_CENTERED",
+                    color: "#edf2fb",
+                    corner_rounding: "2%",
+                    z: 1
+                },
+                {
+                    type: "Text",
+                    pos: "0.22*h;11%+(t*3.5-1)^2*h/30-h*0.033",
+                    size: "100%-0.44*h;24*h/720",
+                    alignment: "TOP_LEFT",
+                    text_alignment: "LEFT",
+                    color: "#202020",
+                    font: "Default",
+                    text: [
+                        "~48*h/720~Hi there!~~",
+                        "~28*h/720~ ~~",
+                        "This is an example presentation. In here you'll see some common things you can do with currently existing Renderable objects! (if you don't yet know what I mean by \"Renderable object\", you should check out the wiki)",
+                        " ",
+                        "Here are all the controls you need to know to navigate the presentation:",
+                        " ",
+                        "*Arrow keys* or *A* and *D*:  Switch between different slides",
+                        "*F11*:  Switch between windowed and fullscreen mode",
+                        "~80*h/720~ ~~",
+                        "That's it for now. Enjoy looking through the different slides!"
+                    ],
+                    z: 2
+                }
+                // New
+                {
+                    type: "RoundedRect",
+                    pos: "50%;50%-h+h*easeOutPow(t-2.5,5)",
+                    size: "100%-0.36*h;82%",
+                    alignment: "MID_CENTERED",
+                    color: "#edf2fb",
+                    corner_rounding: "2%",
+                    z: 1
+                },
+                {
+                    type: "Text",
+                    pos: "0.22*h;11%-h+h*easeOutPow(t-2.5,5)",
+                    size: "(100%-0.44*h)/2;24*h/720",
+                    alignment: "TOP_LEFT",
+                    text_alignment: "LEFT",
+                    color: "#202020",
+                    font: "Default",
+                    text: [
+                        "These are rectangles!",
+                        "There are two types of rectangles in that can be used in presentations: *rounded rectangles* and *regular rectangles*.",
+                        " ",
+                        "Look at what you can do with rectangles!"
+                    ],
+                    z: 2
+                },
+                {
+                    type: "RoundedRect",
+                    pos: "50%+0.08*h;11%-h+h*easeOutPow(t-2.5,5)",
+                    size: "50%-0.30*h-(cos(t/2)+1)*10%;20%+sin(t/2)*2%",
+                    alignment: "TOP_LEFT",
+                    color: "#ccdbfd",
+                    corner_rounding: "(4.5 + sin(t)*2.5)%",
+                    z: 1
+                }
+                {
+                    type: "Rect", // 'Rect' could also be replaced with 'ColoredRect'
+                    pos: "50%+0.08*h+(cos(t)+1)*3%;35%-h+h*easeOutPow(t-2.5,5)",
+                    size: "50%-0.30*h-(cos(t)+1)*10%;20%+sin(t/2)*2%",
+                    alignment: "TOP_LEFT",
+                    color: "#c1d3fe",
+                    z: 1
+                }
+            ]
+        },
+        {
+            background: [255,255,255],
+            content: [
+                // Old
+                {
+                    type: "RoundedRect",
+                    pos: "50%;50%+h*easeInPow(t,2)",
+                    size: "100%-0.36*h;82%",
+                    alignment: "MID_CENTERED",
+                    color: "#edf2fb",
+                    corner_rounding: "2%",
+                    z: 1
+                },
+                {
+                    type: "Text",
+                    pos: "0.22*h;11%+h*easeInPow(t,2)",
+                    size: "(100%-0.44*h)/2;24*h/720",
+                    alignment: "TOP_LEFT",
+                    text_alignment: "LEFT",
+                    color: "#202020",
+                    font: "Default",
+                    text: [
+                        "These are rectangles!",
+                        "There are two types of rectangles in that can be used in presentations: *rounded rectangles* and *regular rectangles*.",
+                        " ",
+                        "Look at what you can do with rectangles!"
+                    ],
+                    z: 2
+                },
+                {
+                    type: "RoundedRect",
+                    pos: "50%+0.08*h;11%+h*easeInPow(t,2)",
+                    size: "50%-0.30*h-(cos(t/2)+1)*10%;20%+sin(t/2)*2%",
+                    alignment: "TOP_LEFT",
+                    color: "#ccdbfd",
+                    corner_rounding: "(4.5 + sin(t)*2.5)%",
+                    z: 1
+                }
+                {
+                    type: "Rect",
+                    pos: "50%+0.08*h+(cos(t)+1)*3%;35%+h*easeInPow(t,2)",
+                    size: "50%-0.30*h-(cos(t)+1)*10%;20%+sin(t/2)*2%",
+                    alignment: "TOP_LEFT",
+                    color: "#c1d3fe",
+                    z: 1
+                },
+                // New
+                {
+                    type: "RoundedRect",
+                    pos: "50%;50%",
+                    size: "100%-0.36*h;82%",
+                    alignment: "MID_CENTERED",
+                    color: "237/255;242/255;251/255;easeInOutPow(t-1.2,2)",
+                    corner_rounding: "2%",
+                    z: 1
+                },
+                {
+                    type: "Text",
+                    pos: "0.22*h;11%",
+                    size: "100%-0.44*h;4%",
+                    alignment: "TOP_LEFT",
+                    text_alignment: "CENTERED",
+                    color: "0.12;0.12;0.12;easeInOutPow(t-1.2,2)",
+                    font: "Default",
+                    text: [
+                        "Text"
+                    ],
+                    z: 2
+                },
+                {
+                    type: "Text",
+                    pos: "0.22*h;17%",
+                    size: "100%-0.44*h;24*h/720",
+                    alignment: "TOP_LEFT",
+                    text_alignment: "LEFT",
+                    color: "0.12;0.12;0.12;easeInOutPow(t-1.2,2)",
+                    font: "Default",
+                    text: [
+                        "Rectangles are cool and all, but `sin(t)/2+0.5;sin(t+0.66*pi)/2+0.5;sin(t+1.33*pi)/2+0.5`look at this text!``",
+                        "Text can not only be in any color you'd like, but it can also be *cursive* or **bold**! (at least in theory; the default font doesn't allow for bold text)",
+                        "You can also ~30*h/720~change~~ the ~40*h/720~size~~ of any part of the text and change the font too! (can't show that though, as there is only one default font...)",
+                    ],
+                    z: 2
+                },
+            ]
+        },
+        {
+            background: {
+                type: "Rect",
+                pos: "0;0",
+                size: "w;h",
+                color: "1-easeInOutPow(t,2)+13/255*easeInOutPow(t,2);1-easeInOutPow(t,2)+27/255*easeInOutPow(t,2);1-easeInOutPow(t,2)+42/255*easeInOutPow(t,2);1",
+                alignment: "TOP_LEFT"
+            },
+            content: [
+                // Old
+                {
+                    type: "RoundedRect",
+                    pos: "50%;50%",
+                    size: "100%-0.36*h;82%",
+                    alignment: "MID_CENTERED",
+                    color: "237/255;242/255;251/255;1-easeInOutPow(t,2)",
+                    corner_rounding: "2%",
+                    z: 1
+                },
+                {
+                    type: "Text",
+                    pos: "0.22*h;11%",
+                    size: "100%-0.44*h;4%",
+                    alignment: "TOP_LEFT",
+                    text_alignment: "CENTERED",
+                    color: "0.12;0.12;0.12;1-easeInOutPow(t,2)",
+                    font: "Default",
+                    text: [
+                        "Text"
+                    ],
+                    z: 2
+                },
+                {
+                    type: "Text",
+                    pos: "0.22*h;17%",
+                    size: "100%-0.44*h;24*h/720",
+                    alignment: "TOP_LEFT",
+                    text_alignment: "LEFT",
+                    color: "0.12;0.12;0.12;1-easeInOutPow(t,2)",
+                    font: "Default",
+                    text: [
+                        "Rectangles are cool and all, but `sin(t)/2+0.5;sin(t+0.66*pi)/2+0.5;sin(t+1.33*pi)/2+0.5`look at this text!``",
+                        "Text can not only be in any color you'd like, but it can also be *cursive* or **bold**! (at least in theory; the default font doesn't allow for bold text)",
+                        "You can also ~30*h/720~change~~ the ~40*h/720~size~~ of any part of the text and change the font too! (can't show that though, as there is only one default font...)",
+                    ],
+                    z: 2
+                },
+                // New
+                {
+                    type: "RoundedRect",
+                    pos: "50%-w+w*easeOutExp(t-0.8);50%",
+                    size: "100%-0.36*h;82%",
+                    alignment: "MID_CENTERED",
+                    color: "#1b263b",
+                    corner_rounding: "2%",
+                    z: 1
+                },
+                {
+                    type: "Text",
+                    pos: "0.22*h-w+w*easeOutExp(t-0.8);11%",
+                    size: "100%-0.44*h;24*h/720",
+                    alignment: "TOP_LEFT",
+                    text_alignment: "LEFT",
+                    color: "#e0e1dd",
+                    font: "Default",
+                    text: [
+                        "Lastly, here are some *images*!",
+                        " ",
+                        "... oh wait. Actually, there aren't any images for you to see here, because there aren't any included in the example files.",
+                        "Well, at least I could show you that the background is also animatable!",
+                        "~60*h/720~ ~~",
+                        "But that's actually a good thing: I encourage you to try and add an image yourself!",
+                        "Find any image of your choice, put it in the same directory as this example presentation and the *a_presentation.exe* executable and then go into the source of this example file and uncomment the *Image*-object at the top of the first slide (further instructions are given in the source). If you manage to do that, then you can basically use this software to write your own presentations already!",
+                        " ",
+                        "If you have any issues doing that, then take a look at the wiki. If you can't find the thing you're looking for on there, you can also open an issue or contact me directly. Have fun!"
+                    ],
+                    z: 2
+                },
             ]
         }
     ]
