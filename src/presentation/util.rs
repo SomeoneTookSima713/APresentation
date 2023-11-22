@@ -173,9 +173,12 @@ impl DefaultContext {
             ctx.func2("easeInPow", |mut t,pow|{ t=t.clamp(0.0,1.0); t.powf(pow) });
             ctx.func2("easeOutPow", |mut t,pow|{ t=t.clamp(0.0,1.0); 1.0-(1.0-t).powf(pow) });
             ctx.func2("easeInOutPow", |mut t,pow|{ t=t.clamp(0.0,1.0); if t<0.5 {(2.0_f64).powf(pow-1.0)*t.powf(pow)} else {1.0-(-2.0*t+2.0).powf(pow)/2.0} });
-            ctx.func("easeInExp", |mut t|{ t=t.clamp(0.0,1.0); if t==0.0 {0.0} else {2.0_f64.powf(10.0*t-10.0)} });
-            ctx.func("easeOutExp", |mut t|{ t=t.clamp(0.0,1.0); if t==1.0 {1.0} else {1.0-2.0_f64.powf(-10.0*t)} });
-            ctx.func("easeInOutExp", |mut t|{ t=t.clamp(0.0,1.0); if t==0.0 {0.0} else if t==1.0 {1.0} else if t<0.5 {2_f64.powf(20.0*t-10.0)/2.0} else {1.0-2_f64.powf(-20.0*t+10.0)/2.0} });
+            ctx.func("easeInExpo", |mut t|{ t=t.clamp(0.0,1.0); if t==0.0 {0.0} else {2.0_f64.powf(10.0*t-10.0)} });
+            ctx.func("easeOutExpo", |mut t|{ t=t.clamp(0.0,1.0); if t==1.0 {1.0} else {1.0-2.0_f64.powf(-10.0*t)} });
+            ctx.func("easeInOutExpo", |mut t|{ t=t.clamp(0.0,1.0); if t==0.0 {0.0} else if t==1.0 {1.0} else if t<0.5 {2_f64.powf(20.0*t-10.0)/2.0} else {1.0-2_f64.powf(-20.0*t+10.0)/2.0} });
+            ctx.func("easeInCirc", |mut t|{ t=t.clamp(0.0, 1.0); 1.0-(1.0-t.powi(2)).sqrt() });
+            ctx.func("easeOutCirc", |mut t|{ t=t.clamp(0.0, 1.0); (1.0-(t-1.0).powi(2)).sqrt() });
+            ctx.func("easeInOutCirc", |mut t|{ t=t.clamp(0.0, 1.0); if t<0.5 {1.0-(1.0-t.powi(2)).sqrt()} else {(1.0-(t-1.0).powi(2)).sqrt()} });
 
             // Random functions
             ctx.func3("clamp",|num,min,max|num.clamp(min, max));

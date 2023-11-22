@@ -272,7 +272,7 @@
                 // New
                 {
                     type: "RoundedRect",
-                    pos: "50%-w+w*easeOutExp(t-0.8);50%",
+                    pos: "50%-w+w*easeOutExpo(t-0.8);50%",
                     size: "100%-0.36*h;82%",
                     alignment: "MID_CENTERED",
                     color: "#1b263b",
@@ -281,7 +281,7 @@
                 },
                 {
                     type: "Text",
-                    pos: "0.22*h-w+w*easeOutExp(t-0.8);11%",
+                    pos: "0.22*h-w+w*easeOutExpo(t-0.8);11%",
                     size: "100%-0.44*h;24*h/720",
                     alignment: "TOP_LEFT",
                     text_alignment: "LEFT",

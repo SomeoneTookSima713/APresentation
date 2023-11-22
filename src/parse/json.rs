@@ -741,7 +741,7 @@ impl<'a> FromJson<'a> for Text<'a> {
                 base,
                 texts,
                 font,
-                &*crate::app::FONTS.get().ok_or(serde::de::Error::custom("error getting font-list"))?,
+                &*crate::FONTS.get().ok_or(serde::de::Error::custom("error getting font-list"))?,
                 placeholders,
                 text_alignment).map_err(merr("Text",None,"Invalid parameters!"))?
         )

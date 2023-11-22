@@ -24,20 +24,18 @@ pub struct Application {
     pub data: PanickingOption<AppData>
 }
 
-pub static FONTS: OnceLock<AssumeThreadSafe<HashMap<String, RefCell<presentation::TextFont>>>> = OnceLock::new();
-
 /// Struct containing all the app's data.
 pub struct AppData {
     /// All the data and state needed for rendering the presentation
-    presentation: presentation::Presentation,
+    pub presentation: presentation::Presentation,
     /// The time since the current slide was switched to.
     /// 
     /// Gets used for calculating the properties of [`Renderable`] objects.
-    time: f64,
+    pub time: f64,
     /// The time of the last frame.
     /// 
     /// Used for calculating the time elapsed between frames.
-    last_frame: Instant,
+    pub last_frame: Instant,
     /// Gets used for measuring FPS
     /// 
     /// Only enabled in debug relases or with the 'debug_features' feature-flag.
@@ -62,7 +60,7 @@ impl AppData {
         let mut parser = parse::get_parser(filepath.as_str()).expect("No parser found for file type!");
 
         let document_fonts = parser.parse_fonts(filecontents.as_str()).unwrap_or_else(|e| { parser.handle_error(e); unreachable!() });
-        FONTS.set({
+        crate::FONTS.set({
             let mut map = HashMap::new();
 
             // Adds the default font in case it was included into the binary at compile time.
@@ -110,7 +108,7 @@ impl AppData {
                 BaseProperties::new("0;0","w;4%","1;1;1;1","TOP_LEFT").map_err(|_|()).unwrap(),
                 vec!["End of presentation"],
                 "Default".to_owned(),
-                &*FONTS.get().unwrap(),
+                &*crate::FONTS.get().unwrap(),
                 HashMap::new(),
                 "LEFT").map_err(|_|()).unwrap();
             last_slide.add(text, 0);
