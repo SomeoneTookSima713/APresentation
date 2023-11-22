@@ -13,17 +13,54 @@ use super::{ Parser, SlideData };
 
 pub struct JSONParser;
 impl Parser for JSONParser {
+    type Error = deser_hjson::Error;
 
-    fn parse<'a>(&mut self, contents: &'a str) -> Result<Vec<SlideData>, Box<dyn Debug>> {
-        let document: Document = deser_hjson::from_str(contents).map_err(|e| Box::new(e) as Box<dyn Debug>)?;
+    fn parse<'a>(&mut self, contents: &'a str) -> Result<Vec<SlideData>, Self::Error> {
+        let document: Document = deser_hjson::from_str(contents)?;
 
         Ok(document.0)
     }
 
-    fn parse_fonts<'a>(&mut self, contents: &'a str) -> Result<HashMap<String, (String, String)>, Box<dyn Debug>> {
-        let fonts: DocumentFonts = deser_hjson::from_str(contents).map_err(|e| Box::new(e) as Box<dyn Debug>)?;
+    fn parse_fonts<'a>(&mut self, contents: &'a str) -> Result<HashMap<String, (String, String)>, Self::Error> {
+        let fonts: DocumentFonts = deser_hjson::from_str(contents)?;
 
         Ok(fonts.0)
+    }
+
+    fn handle_error(&self, err: Self::Error) {
+        use deser_hjson::{ Error, ErrorCode };
+        match err {
+            Error::Io(e) => panic!("\nIO error:\n\t{e}\n"),
+            Error::RawSerde(s) => panic!("\nParsing Error:\n\t{}\n",s.replace("\n", "\n\t")),
+            Error::Syntax { line, col, code, at } => {
+                let codestr = match code {
+                    ErrorCode::Eof => "Unexpected end of file!",
+                    ErrorCode::ExpectedArray => "Expected an array!",
+                    ErrorCode::ExpectedArrayComma => "Expected comma to seperate elements of array!",
+                    ErrorCode::ExpectedArrayEnd => "Expected end of array!",
+                    ErrorCode::ExpectedBoolean => "Expected a boolean!",
+                    ErrorCode::ExpectedEnum => "Expected an enum!",
+                    ErrorCode::ExpectedF32 | ErrorCode::ExpectedF64 => "Expected a float!",
+                    ErrorCode::ExpectedI16 | ErrorCode::ExpectedI32 | ErrorCode::ExpectedI64 | ErrorCode::ExpectedI8 | ErrorCode::ExpectedU16 |
+                    ErrorCode::ExpectedU32 | ErrorCode::ExpectedU64 | ErrorCode::ExpectedU8 | ErrorCode::ExpectedInteger => "Expected an integer!",
+                    ErrorCode::ExpectedMap => "Expected a map!",
+                    ErrorCode::ExpectedMapColon => "Expected a colon in map!",
+                    ErrorCode::ExpectedMapComma => "Expected a comma to seperate elements of map!",
+                    ErrorCode::ExpectedMapEnd => "Expected end of map!",
+                    ErrorCode::ExpectedNull => "Expected null!",
+                    ErrorCode::ExpectedPositiveInteger => "Expected a positive integer!",
+                    ErrorCode::ExpectedSingleChar => "Expected a singular character",
+                    ErrorCode::ExpectedString => "Expected a string",
+                    ErrorCode::InvalidEscapeSequence => "Invalid escape sequence!",
+                    ErrorCode::TrailingCharacters => "Unexpected trailing characters!",
+                    ErrorCode::UnexpectedChar => "Unexpected character!",
+                };
+                panic!("\nHJSON Syntax error at Line {line}, Column {col}:\n\t{at}\n\t^ {codestr}\n")
+            },
+            Error::Utf8(e) => panic!("\nUTF8 error:\n\t{e}\n"),
+            Error::Serde { line, col, message } => panic!("\nSerde error at Line {line}, Column {col}:\n\t{}\n", message.replace("\n", "\n\t")),
+            _ => panic!("\nUnknown error:\n\t{err}\n")
+        }
     }
 }
 
@@ -301,11 +338,65 @@ impl<'de> Deserialize<'de> for JSONValue {
 }
 
 use crate::presentation::renderable::*;
+use crate::presentation::util::PropertyError;
 
 /// Helper struct with functions for parsing the JSON-document
 #[derive(Debug)]
 pub struct Document(pub Vec<SlideData>);
 impl Document {
+    fn parse_base_properties<'a, E: serde::de::Error>(map: &HashMap<String, JSONValue>, renderable_type: String) -> Result<BaseProperties<'a>, E> {
+        let err = serde::de::Error::custom;
+
+        let merr = |renderable: String, property: Option<String>, desc: String| move |e: PropertyError|{
+            let underscore = "_".to_owned();
+            let (r, p, desc) = e.syntax_error(renderable, property.as_ref().unwrap_or(&underscore).clone(), desc);
+
+            if property.is_some() {
+                serde::de::Error::custom(format!("error while initializing property {p} of {r}: {desc}").as_str())
+            } else {
+                serde::de::Error::custom(format!("error while creating {r}: {desc}").as_str())
+            }
+        };
+
+        let pos: String = get_value_alternates(map, vec!["pos", "position"])?.clone().try_into().map_err(|_|err("position needs to be a string"))?;
+        let size: String = get_value_alternates(map, vec!["size"])?.clone().try_into().map_err(|_|err("size needs to be a string"))?;
+        let col: String = {
+            let str: String = get_value_alternates(map, vec!["col", "color", "colour"])?.clone().try_into().map_err(|_|err("color needs to be a string"))?;
+            if str.starts_with('#') {
+                // If the color string starts with a '#', we don't have a pair of expressions, but
+                // a hexadecimal color value instead.
+
+                // Do some rudimentary checks if the format is correct (as to not throw confusing
+                // error messages at the user)
+                if str.len()!=7 && str.len()!=9 {
+                    // The string needs to be of length 7 (#RRGGBB) or 9 (#RRGGBBAA), otherwise it
+                    // is invalid
+                    Err(err("invalid hexadecimal color format"))?;
+                }
+
+                let red_hex: String = str[1..3].to_lowercase();
+                let green_hex: String = str[3..5].to_lowercase();
+                let blue_hex: String = str[5..7].to_lowercase();
+                let alpha_hex: String = if str.len()==9 { str[7..9].to_lowercase() } else { "ff".to_owned() };
+
+                let red = u8::from_str_radix(&red_hex, 16).map_err(|_|err("invalid hexadecimal color value"))? as f32;
+                let green = u8::from_str_radix(&green_hex, 16).map_err(|_|err("invalid hexadecimal color value"))? as f32;
+                let blue = u8::from_str_radix(&blue_hex, 16).map_err(|_|err("invalid hexadecimal color value"))? as f32;
+                let alpha = u8::from_str_radix(&alpha_hex, 16).map_err(|_|err("invalid hexadecimal color value"))? as f32;
+
+                format!("{};{};{};{}",red/255.0,green/255.0,blue/255.0,alpha/255.0)
+            } else {
+                // If the color string doesn't start with a '#', we do have a pair of expressions.
+
+                str
+            }
+        };
+
+        let alignment: String = get_value_alternates(map, vec!["align", "alignment"])?.clone().try_into().map_err(|_|err("alignment needs to be a string"))?;
+
+        BaseProperties::new(pos, size, col, alignment).map_err(merr(renderable_type, None, "Invalid alignment or invalid expression count!".to_owned()))
+    }
+
     /// Parses the document to get a [`Vec`] of [`SlideData`]s
     pub fn slides_from_json<E: serde::de::Error>(data: &HashMap<String, JSONValue>) -> Result<SlideData, E> {
         // Helper function for creating a general error message for the background being invalid.
@@ -313,6 +404,19 @@ impl Document {
 
         // Alias for creating any serde error message.
         let err = serde::de::Error::custom;
+
+        let merr = |renderable: String, property: Option<String>, desc: String| move |e: PropertyError|{
+            let underscore = "_".to_owned();
+            let (r, p, desc) = e.syntax_error(renderable, property.as_ref().unwrap_or(&underscore).clone(), desc);
+
+            if property.is_some() {
+                serde::de::Error::custom(format!("error while initializing property {p} of {r}: {desc}").as_str())
+            } else {
+                serde::de::Error::custom(format!("error while creating {r}: {desc}").as_str())
+            }
+        };
+
+        let never_err = "Error that shouldn't happen! Report this!".to_owned();
 
         // Parse the background object
         let background: Box<dyn Renderable>;
@@ -327,21 +431,33 @@ impl Document {
                 let b: f64 = vec.get(2).ok_or((err_bg_invalid)())?.clone().try_into().map_err(|_|(err_bg_invalid)())?;
 
                 // Use the RGB-values to create a colored rectangle filling the whole screen
-                background = Box::new( ColoredRect::new("0;0", "100%;100%", format!("{r};{g};{b};1"), "TOP_LEFT") ) as Box<dyn Renderable>;
+                let object = ColoredRect::new(BaseProperties::new("0;0", "w;h", format!("{r};{g};{b};1"), "TOP_LEFT").map_err((merr)("Background".to_owned(),None,never_err))?);
+
+                background = Box::new( object ) as Box<dyn Renderable>;
             },
             // More complex case: Any renderable object
             JSONValue::Object(hashmap) => {
 
+                // Get the type of the Renderable.
+                //   Used for error messages and actually constructing a Renderable
+                let renderable_type: String = hashmap.get("type").ok_or(err("required field \"type\" missing"))?.clone()
+                    .try_into().map_err(|_|err("field \"type\" needs to be a string"))?;
+
+                let base = Self::parse_base_properties(hashmap, renderable_type.clone())?;
+
+                let map = hashmap.clone();
+
                 // Tries to construct a Renderable object based on the specified type.
                 //   Errors if the specified type doesn't exist, the field is invalid or the
                 //   constructor function failed.
-                let renderable_type: String = hashmap.get("type").ok_or(err("required field \"type\" missing"))?.clone()
-                    .try_into().map_err(|_|err("field \"type\" needs to be a string"))?;
-                let result = (RENDERABLE_FUNCS.get(&renderable_type).ok_or(err("field \"type\" is invalid"))?)(hashmap);
+                let result = match RENDERABLE_FUNCS.get(&renderable_type) {
+                    Some(t) => (t)(map, base),
+                    None => return Err(err("field \"type\" is invalid"))
+                };
 
                 // The error when the constructor function failed occurs here.
                 match result {
-                    Ok(b) => background = b,
+                    Ok(b) => background = b.copy(),
                     Err(_) => return Err((err_bg_invalid)())
                 }
             },
@@ -359,12 +475,17 @@ impl Document {
                 for (i, renderable_json) in vec.iter().enumerate() {
                     let map: HashMap<String, JSONValue> = renderable_json.clone().try_into().map_err(|_|serde::de::Error::custom("field \"content\" must be an array of objects"))?;
 
-                    // Tries to construct a Renderable object based on the specified type.
-                    //   Errors if the specified type doesn't exist, the field is invalid or the
-                    //   constructor function failed.
+                    // Get the type of the Renderable.
+                    //   Used for error messages and actually constructing a Renderable
                     let renderable_type: String = map.get("type").ok_or(err("required field \"type\" missing"))?.clone()
                         .try_into().map_err(|_|err("field \"type\" needs to be a string"))?;
-                    let result = (RENDERABLE_FUNCS.get(&renderable_type).ok_or(err("field \"type\" is invalid"))?)(&map);
+
+                    let base = Self::parse_base_properties(&map, renderable_type.clone())?;
+
+                    // Try to construct a Renderable object based on the specified type.
+                    //   Errors if the specified type doesn't exist, the field is invalid or the
+                    //   constructor function failed.
+                    let result = (RENDERABLE_FUNCS.get(&renderable_type).ok_or(err("field \"type\" is invalid"))?)(map.clone(), base);
                     let object = result.map_err(|e|err(format!("invalid contents of renderable object #{i} ({e})").leak()))?;
 
                     // Note: The error message just says 'expected an integer' because the number
@@ -464,13 +585,15 @@ impl<'de> Deserialize<'de> for DocumentFonts {
 }
 
 use once_cell::sync::Lazy;
-type FnRenderableParse = Box<dyn Fn(&HashMap<String, JSONValue>) -> Result<Box<dyn Renderable>, String>>;
+type FnRenderableParse<'a> = Box<dyn Fn(HashMap<String, JSONValue>, BaseProperties<'a>) -> Result<Box<dyn Renderable>, String>>;
 /// A [`HashMap`] of functions for parsing each type of [`Renderable`].
 /// 
 /// The index defines the name of the type.
 const RENDERABLE_FUNCS: Lazy<HashMap<String, FnRenderableParse>> = Lazy::new(|| {
     let mut map = HashMap::new();
     map.insert("ColoredRect".to_owned(), ColoredRect::renderable_func::<deser_hjson::Error>());
+    map.insert("Rect".to_owned(), ColoredRect::renderable_func::<deser_hjson::Error>());
+    
     map.insert("RoundedRect".to_owned(), RoundedRect::renderable_func::<deser_hjson::Error>());
     map.insert("Text".to_owned(), Text::renderable_func::<deser_hjson::Error>());
     map.insert("Image".to_owned(), Image::renderable_func::<deser_hjson::Error>());
@@ -495,16 +618,16 @@ where
 /// Trait for parsing JSON data into a struct.
 /// 
 /// Also contains some helper functions related to [`Renderable`]s that can be parsed from JSON.
-trait FromJson {
+trait FromJson<'a> {
     /// Parses JSON-data and into itself
-    fn from_json<E: serde::de::Error>(dict: &HashMap<String, JSONValue>) -> Result<Self, E>
+    fn from_json<E: serde::de::Error>(dict: &'a HashMap<String, JSONValue>, base: BaseProperties<'a>) -> Result<Self, E>
     where Self: Sized;
 
     /// Returns a closure that constructs a Renderable object
-    fn renderable_func<E: serde::de::Error>() -> FnRenderableParse
+    fn renderable_func<E: serde::de::Error>() -> FnRenderableParse<'a>
     where Self: Sized + Renderable + 'static {
-        let func = |dict: &'_ HashMap<String, JSONValue>| {
-            match Self::from_json::<E>(dict) {
+        let func = |dict: HashMap<String, JSONValue>, base: BaseProperties<'a>| {
+            match Self::from_json::<E>(&*Box::leak(Box::new(dict)), base) {
                 Ok(s) => Ok(Box::new(s) as Box<dyn Renderable>),
                 Err(e) => Err(format!("{e}"))
             }
@@ -514,122 +637,65 @@ trait FromJson {
     }
 }
 
-impl<'a> FromJson for ColoredRect<'a> {
-    fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
+impl<'a> FromJson<'a> for ColoredRect<'a> {
+    fn from_json<E: serde::de::Error>(_hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties<'a>) -> Result<Self, E>
     where Self: Sized {
-
-        // Get the position, size, color and alignment from the JSON data
-        let pos: String;
-        match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
-            Ok(p) => pos = p,
-            Err(_) => return Err(serde::de::Error::custom("position needs to be a string"))
-        }
-        let size: String;
-        match get_value_alternates(hashmap, vec!["size"])?.clone().try_into() {
-            Ok(v) => size = v,
-            Err(_) => return Err(serde::de::Error::custom("size needs to be a string"))
-        }
-        let col: String;
-        match get_value_alternates(hashmap, vec!["col", "color"])?.clone().try_into() {
-            Ok(v) => col = v,
-            Err(_) => return Err(serde::de::Error::custom("color needs to be a string"))
-        }
-        let alignment: String;
-        match get_value_alternates(hashmap, vec!["align", "alignment"])?.clone().try_into() {
-            Ok(v) => alignment = v,
-            Err(_) => return Err(serde::de::Error::custom("alignment needs to be a string"))
-        }
-
         // Create the struct
         Ok(
-            ColoredRect::new(
-                pos,
-                size,
-                col,
-                alignment)
+            ColoredRect::new( base )
         )
     }
 }
 
-impl<'a> FromJson for RoundedRect<'a> {
-    fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
+impl<'a> FromJson<'a> for RoundedRect<'a> {
+    fn from_json<E: serde::de::Error>(hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties<'a>) -> Result<Self, E>
     where Self: Sized {
 
-        // Get the position, size, color, corner rounding radius and alignment from the JSON data
-        let pos: String;
-        match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
-            Ok(p) => pos = p,
-            Err(_) => return Err(serde::de::Error::custom("position needs to be a string"))
-        }
-        let size: String;
-        match get_value_alternates(hashmap, vec!["size"])?.clone().try_into() {
-            Ok(v) => size = v,
-            Err(_) => return Err(serde::de::Error::custom("size needs to be a string"))
-        }
-        let col: String;
-        match get_value_alternates(hashmap, vec!["col", "color"])?.clone().try_into() {
-            Ok(v) => col = v,
-            Err(_) => return Err(serde::de::Error::custom("color needs to be a string"))
-        }
+        let merr = |renderable: &'static str, property: Option<&'static str>, desc: &'static str| move |e: PropertyError|{
+            let (r, p, desc) = e.syntax_error(renderable, property.unwrap_or("_"), desc);
+
+            if property.is_some() {
+                serde::de::Error::custom(format!("error while initializing property {p} of {r}: {desc}").as_str())
+            } else {
+                serde::de::Error::custom(format!("error while creating {r}: {desc}").as_str())
+            }
+        };
         let corner_rounding: String;
         match get_value_alternates(hashmap, vec!["corners", "corner_rounding", "rounding", "radius", "corner_radius"])?.clone().try_into() {
             Ok(v) => corner_rounding = v,
             Err(_) => return Err(serde::de::Error::custom("corner radius needs to be a string"))
         }
-        let alignment: String;
-        match get_value_alternates(hashmap, vec!["align", "alignment"])?.clone().try_into() {
-            Ok(v) => alignment = v,
-            Err(_) => return Err(serde::de::Error::custom("alignment needs to be a string"))
-        }
 
         // Create the struct
         Ok(
             RoundedRect::new(
-                pos,
-                size,
-                col,
-                corner_rounding,
-                alignment)
+                base,
+                corner_rounding).map_err(merr("RoundedRect",Some("corner_rounding"),"Invalid corner rounding!"))?
         )
     }
 }
 
-impl<'a> FromJson for Text<'a> {
-    fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
+impl<'a> FromJson<'a> for Text<'a> {
+    fn from_json<E: serde::de::Error>(hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties<'a>) -> Result<Self, E>
     where Self: Sized {
         let err = serde::de::Error::custom;
 
+        let merr = |renderable: &'static str, property: Option<&'static str>, desc: &'static str| move |e: PropertyError|{
+            let (r, p, desc) = e.syntax_error(renderable, property.unwrap_or("_"), desc);
+
+            if property.is_some() {
+                serde::de::Error::custom(format!("error while initializing property {p} of {r}: {desc}").as_str())
+            } else {
+                serde::de::Error::custom(format!("error while creating {r}: {desc}").as_str())
+            }
+        };
+
         // Get the position, wrapping width, font size, color, font type, alignment and text array
         // from the JSON data
-        let pos: String;
-        match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
-            Ok(p) => pos = p,
-            Err(_) => return Err(err("position needs to be a string"))
-        }
-        let width: String;
-        match get_value_alternates(hashmap, vec!["width", "wrapping_width"])?.clone().try_into() {
-            Ok(p) => width = p,
-            Err(_) => return Err(err("wrapping width needs to be a string"))
-        }
-        let size: String;
-        match get_value_alternates(hashmap, vec!["size", "height", "text_size", "text_height"])?.clone().try_into() {
-            Ok(v) => size = v,
-            Err(_) => return Err(err("text height needs to be a string"))
-        }
-        let col: String;
-        match get_value_alternates(hashmap, vec!["col", "color"])?.clone().try_into() {
-            Ok(v) => col = v,
-            Err(_) => return Err(err("color needs to be a string"))
-        }
         let font: String;
         match get_value_alternates(hashmap, vec!["font", "base_font"])?.clone().try_into() {
             Ok(v) => font = v,
             Err(_) => return Err(err("font radius needs to be a string"))
-        }
-        let alignment: String;
-        match get_value_alternates(hashmap, vec!["align", "alignment"])?.clone().try_into() {
-            Ok(v) => alignment = v,
-            Err(_) => return Err(err("alignment needs to be a string"))
         }
         let text_alignment: String;
         match get_value_alternates(hashmap, vec!["text_align", "text_alignment"])?.clone().try_into() {
@@ -672,53 +738,42 @@ impl<'a> FromJson for Text<'a> {
         // Create the struct
         Ok(
             Text::new(
-                pos,
+                base,
                 texts,
-                width,
-                size,
-                alignment,
-                col,
                 font,
-                &*crate::app::FONTS.get().ok_or(serde::de::Error::custom("error getting font-list"))?,
+                &*crate::FONTS.get().ok_or(serde::de::Error::custom("error getting font-list"))?,
                 placeholders,
-                text_alignment)
+                text_alignment).map_err(merr("Text",None,"Invalid parameters!"))?
         )
     }
 }
 
-impl<'a> FromJson for Image<'a> {
-    fn from_json<E: serde::de::Error>(hashmap: &HashMap<String, JSONValue>) -> Result<Self, E>
+impl<'a> FromJson<'a> for Image<'a> {
+    fn from_json<E: serde::de::Error>(hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties<'a>) -> Result<Self, E>
     where Self: Sized {
 
+        let merr = |renderable: &'static str, property: Option<&'static str>, desc: &'static str| move |e: PropertyError|{
+            let (r, p, desc) = e.syntax_error(renderable, property.unwrap_or("_"), desc);
+
+            if property.is_some() {
+                serde::de::Error::custom(format!("error while initializing property {p} of {r}: {desc}").as_str())
+            } else {
+                serde::de::Error::custom(format!("error while creating {r}: {desc}").as_str())
+            }
+        };
+
         // Get the position, size, file path and alignment from the JSON data
-        let pos: String;
-        match get_value_alternates(hashmap, vec!["pos", "position"])?.clone().try_into() {
-            Ok(p) => pos = p,
-            Err(_) => return Err(serde::de::Error::custom("position needs to be a string"))
-        }
-        let size: String;
-        match get_value_alternates(hashmap, vec!["size"])?.clone().try_into() {
-            Ok(v) => size = v,
-            Err(_) => return Err(serde::de::Error::custom("size needs to be a string"))
-        }
         let path: String;
         match get_value_alternates(hashmap, vec!["path", "file", "file_path"])?.clone().try_into() {
             Ok(v) => path = v,
             Err(_) => return Err(serde::de::Error::custom("file path needs to be a string"))
         }
-        let alignment: String;
-        match get_value_alternates(hashmap, vec!["align", "alignment"])?.clone().try_into() {
-            Ok(v) => alignment = v,
-            Err(_) => return Err(serde::de::Error::custom("alignment needs to be a string"))
-        }
 
         // Create the struct
         Ok(
             Image::new(
-                PathBuf::try_from(path).map_err(|_| serde::de::Error::custom("invalid file path specified"))?,
-                pos,
-                size,
-                alignment)
+                base,
+                PathBuf::try_from(path).map_err(|_| serde::de::Error::custom("invalid file path specified"))?).map_err(merr("Image", Some("path"), "Invalid file format!"))?
         )
     }
 }

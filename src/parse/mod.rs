@@ -7,9 +7,13 @@ use crate::presentation::Renderable;
 pub mod json;
 
 pub trait Parser {
-    fn parse<'a>(&mut self, contents: &'a str) -> Result<Vec<SlideData>, Box<dyn Debug>>;
+    type Error: serde::de::Error;
 
-    fn parse_fonts<'a>(&mut self, contents: &'a str) -> Result<HashMap<String, (String, String)>, Box<dyn Debug>>;
+    fn parse<'a>(&mut self, contents: &'a str) -> Result<Vec<SlideData>, Self::Error>;
+
+    fn parse_fonts<'a>(&mut self, contents: &'a str) -> Result<HashMap<String, (String, String)>, Self::Error>;
+
+    fn handle_error(&self, err: Self::Error);
 }
 
 #[derive(Debug)]

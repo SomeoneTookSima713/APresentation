@@ -9,14 +9,27 @@ use indexmap::IndexMap;
 use crate::util::DefaultingOption;
 use crate::presentation::renderable;
 
-use renderable::Renderable;
+use renderable::{ Renderable, BaseProperties };
 
-/// Constructs an instance of the default background for slides:
+use once_cell::sync::Lazy;
+/// An instance of the default background for slides:
 /// A white rectangle
-#[allow(non_snake_case)]
-fn DEFAULT_BACKGROUND_RENDERABLE<'a>() -> renderable::ColoredRect<'a> {
-    renderable::ColoredRect::new("0;0", "w;h", "1;1;1;1", "TOP_LEFT")
-}
+pub const DEFAULT_BACKGROUND_RENDERABLE: Lazy<renderable::ColoredRect> = Lazy::new(|| {
+    use crate::presentation::util::PropertyError;
+
+    let err_begin = "Error instantiating default slide background:";
+    let err_end = "This should not happen! Please report this on the issue tracker!";
+
+    let properties = match BaseProperties::new("0;0", "w;h", "1;1;1;1", "TOP_LEFT") {
+        Ok(p) => p,
+        Err(e) => match e {
+            PropertyError::BadAlignment => panic!("{err_begin} Invalid alignment! {err_end}"),
+            PropertyError::MismatchedExprCount => panic!("{err_begin} Invalid expression count! {err_end}"),
+            PropertyError::SyntaxError(_, prop, spec) => panic!("{err_begin} Error in field {prop}: {} {err_end}",spec.unwrap_or("No furhter information given.".to_owned())),
+        }
+    };
+    renderable::ColoredRect::new(properties)
+});
 
 /// Contains all the objects (including a background object) used for rendering a slide.
 pub struct Slide {
@@ -33,7 +46,7 @@ impl Slide {
         let bg: DefaultingOption<Box<dyn Renderable>> = background.into();
         Slide {
             objects: IndexMap::new(),
-            background: bg.consume(Box::new(DEFAULT_BACKGROUND_RENDERABLE()))
+            background: bg.consume(Box::new(DEFAULT_BACKGROUND_RENDERABLE.clone()))
         }
     }
 

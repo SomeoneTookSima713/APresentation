@@ -16,6 +16,7 @@ use super::presentation;
 // Gets used for automatic links in comments.
 #[allow(unused)]
 use crate::presentation::Renderable;
+use crate::presentation::renderable::BaseProperties;
 
 pub struct Application {
     pub opengl_version: OpenGL,
@@ -23,20 +24,18 @@ pub struct Application {
     pub data: PanickingOption<AppData>
 }
 
-pub static FONTS: OnceLock<AssumeThreadSafe<HashMap<String, RefCell<presentation::TextFont>>>> = OnceLock::new();
-
 /// Struct containing all the app's data.
 pub struct AppData {
     /// All the data and state needed for rendering the presentation
-    presentation: presentation::Presentation,
+    pub presentation: presentation::Presentation,
     /// The time since the current slide was switched to.
     /// 
     /// Gets used for calculating the properties of [`Renderable`] objects.
-    time: f64,
+    pub time: f64,
     /// The time of the last frame.
     /// 
     /// Used for calculating the time elapsed between frames.
-    last_frame: Instant,
+    pub last_frame: Instant,
     /// Gets used for measuring FPS
     /// 
     /// Only enabled in debug relases or with the 'debug_features' feature-flag.
@@ -60,8 +59,8 @@ impl AppData {
         // Create an instance of a parser (which parser gets instantiated depends on the file extension)
         let mut parser = parse::get_parser(filepath.as_str()).expect("No parser found for file type!");
 
-        let document_fonts = parser.parse_fonts(filecontents.as_str()).unwrap();
-        FONTS.set({
+        let document_fonts = parser.parse_fonts(filecontents.as_str()).unwrap_or_else(|e| { parser.handle_error(e); unreachable!() });
+        crate::FONTS.set({
             let mut map = HashMap::new();
 
             // Adds the default font in case it was included into the binary at compile time.
@@ -84,7 +83,7 @@ impl AppData {
             AssumeThreadSafe(map)
         }).ok().expect("error initializing fonts");
 
-        let document = parser.parse(filecontents.as_str()).unwrap();
+        let document = parser.parse(filecontents.as_str()).unwrap_or_else(|e| { parser.handle_error(e); unreachable!() });
 
         let mut presentation = presentation::Presentation::new();
 
@@ -102,8 +101,17 @@ impl AppData {
         // font though, as the text needs a font to render itself.
         #[cfg(default_font)]
         {
-            let mut last_slide = presentation::Slide::new(Box::new(presentation::ColoredRect::new("0;0", "w;h", "0;0;0;1", "TOP_LEFT")) as Box<dyn presentation::Renderable>);
-            last_slide.add(presentation::Text::new("0;0", vec!["End of presentation"], "w", "4%", "TOP_LEFT", "1;1;1;1", "Default".to_owned(), &*FONTS.get().unwrap(), HashMap::new(), "LEFT"), 0);
+            let bg = presentation::ColoredRect::new(BaseProperties::new("0;0", "w;h", "0;0;0;1", "TOP_LEFT").map_err(|_|()).unwrap());
+            let mut last_slide = presentation::Slide::new(Box::new(bg) as Box<dyn presentation::Renderable>);
+
+            let text = presentation::Text::new(
+                BaseProperties::new("0;0","w;4%","1;1;1;1","TOP_LEFT").map_err(|_|()).unwrap(),
+                vec!["End of presentation"],
+                "Default".to_owned(),
+                &*crate::FONTS.get().unwrap(),
+                HashMap::new(),
+                "LEFT").map_err(|_|()).unwrap();
+            last_slide.add(text, 0);
 
             presentation.add_slide(last_slide);
         }
