@@ -3,11 +3,11 @@ use std::cell::RefCell;
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use opengl_graphics::{ GlGraphics, OpenGL };
+use opengl_graphics::{ GlGraphics, OpenGL, Texture, Filter };
 use piston::{RenderArgs, UpdateArgs, ButtonArgs, Button, ButtonState, Key};
 use piston_window::PistonWindow;
 
-use egui::{ RawInput, FullOutput, Context };
+use egui::{ RawInput, FullOutput, Context, TextureId };
 
 #[allow(unused)]
 use log::{ debug as log_dbg, info as log_info, warn as log_warn, error as log_err };
@@ -57,7 +57,11 @@ pub struct AppData {
     /// Contains all the data passed from [`egui`] to the application.
     egui_output: FullOutput,
     /// The [`Context`] object used for [`egui`].
-    egui_context: Context
+    egui_context: Context,
+
+    egui_textures: HashMap<TextureId, Texture>,
+
+    egui_time: f64,
 }
 impl AppData {
     pub fn create(filepath: String) -> AppData {
@@ -137,7 +141,9 @@ impl AppData {
             last_press: (false, false, false),
             egui_input: Default::default(),
             egui_output: Default::default(),
-            egui_context: Default::default()
+            egui_context: Default::default(),
+            egui_textures: HashMap::new(),
+            egui_time: 0.0
         }
     }
 }
@@ -194,7 +200,8 @@ impl Application {
 
         // Draw the presentation
         self.opengl_backend.draw(args.viewport(), |c, gl| {
-            use graphics::Transformed;
+            use graphics::{ Transformed, Graphics };
+            use opengl_graphics::{ TextureSettings, Wrap };
 
             // We need to set a local variable here to copy the value, because we already mutably
             // borrowed 'self' in the call above and would immutably borrow it by directly passing
@@ -208,15 +215,62 @@ impl Application {
             let gui = &self.data.egui_output;
 
             let tris = self.data.egui_context.tessellate(gui.shapes.clone());
-            let textures = &self.data.egui_output.textures_delta.set;
+            let mut to_add = HashMap::new();
+            let mut to_remove = Vec::new();
+
+            {
+                let textures = &self.data.egui_output.textures_delta;
+
+                for (id, data) in &textures.set {
+                    let texture = match &data.image {
+                        egui::ImageData::Color(data) => {
+                            use image::RgbaImage;
+                            let img = RgbaImage::from_vec(data.size[0] as u32, data.size[1] as u32, data.pixels.iter().map(|c|c.to_srgba_unmultiplied().to_vec()).flatten().collect()).unwrap();
+                            Texture::from_image(&img, &TextureSettings::new().wrap_u(Wrap::ClampToEdge).wrap_v(Wrap::ClampToEdge).generate_mipmap(false).convert_gamma(true))
+                        },
+                        egui::ImageData::Font(data) => {
+                            use image::RgbaImage;
+                            let img = RgbaImage::from_vec(data.size[0] as u32, data.size[1] as u32, data.srgba_pixels(None).map(|c|c.to_srgba_unmultiplied().to_vec()).flatten().collect()).unwrap();
+                            Texture::from_image(&img, &TextureSettings::new().wrap_u(Wrap::ClampToEdge).wrap_v(Wrap::ClampToEdge).generate_mipmap(false).convert_gamma(true))
+                        }
+                    };
+
+                    to_add.insert(id.clone(), texture);
+                }
+
+                for id in &textures.free {
+                    to_remove.push(id.clone());
+                }
+            }
+
+            for id in to_remove {
+                drop(self.data.egui_textures.remove(&id));
+            }
+            self.data.egui_textures.extend(to_add);
 
             for tri in tris {
                 match tri.primitive {
                     egui::epaint::Primitive::Mesh(m) => {
-                        
+                        let vertices = &m.vertices;
+                        let indices = &m.indices;
+                        gl.tri_list_uv_c(&c.draw_state, self.data.egui_textures.get(&m.texture_id).unwrap(), |c| {
+                            let verts = indices.iter().map(|i|{
+                                let p = &vertices[*i as usize].pos;
+                                [p.x,p.y]
+                            }).collect::<Vec<[f32;2]>>();
+                            let uv = indices.iter().map(|i|{
+                                let p = &vertices[*i as usize].uv;
+                                [p.x,p.y]
+                            }).collect::<Vec<[f32;2]>>();
+                            let cols = indices.iter().map(|i|{
+                                let p = &vertices[*i as usize].color;
+                                p.to_srgba_unmultiplied().map(|v|v as f32/255.0)
+                            }).collect::<Vec<[f32;4]>>();
+                            (c)(verts.as_slice(),uv.as_slice(),cols.as_slice())
+                        });
                     },
-                    egui::epaint::Primitive::Callback(c) => {
-                        
+                    egui::epaint::Primitive::Callback(_) => {
+                        unimplemented!()
                     }
                 }
             }
@@ -226,7 +280,7 @@ impl Application {
     /// Updates the application.
     /// 
     /// Currently only used for measuring FPS if debugging is enabled.
-    pub fn update(&mut self, _args: &UpdateArgs) {
+    pub fn update(&mut self, args: &UpdateArgs) {
         // self.data.time += args.dt;
         #[cfg(any(debug_features))]
         if self.data.time>= self.data.timeint as f64 + 1.0 {
@@ -235,6 +289,14 @@ impl Application {
             log_dbg!("FPS: {} / {}", self.data.frames, 120.0);
             self.data.frames = 0;
         }
+
+        self.data.egui_time += args.dt;
+
+        let mut input = std::mem::replace(&mut self.data.egui_input, Default::default());
+        input.time = Some(self.data.egui_time);
+
+        let out = self.data.egui_context.run(input, |c| self.ui(c));
+        self.data.egui_output = out;
     }
 
     pub fn resize(&mut self, new_res: (u32, u32)) {
@@ -243,6 +305,10 @@ impl Application {
 
     /// Checks for input and updates the applications state accordingly.
     pub fn input(&mut self, args: &ButtonArgs) -> bool {
+        use egui::Event;
+
+        todo!();
+
         match (args.button, args.state, self.data.last_press) {
             (Button::Keyboard(Key::A | Key::Left), ButtonState::Press, (false, _, _)) => {
                 self.data.presentation.previous_slide();
@@ -272,5 +338,9 @@ impl Application {
         }
 
         false
+    }
+
+    pub fn ui(&self, ctx: &Context) {
+
     }
 }

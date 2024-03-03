@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::cell::RefCell;
-use std::sync::OnceLock;
 use std::time::Instant;
 
 use opengl_graphics::{ GlGraphics, OpenGL };

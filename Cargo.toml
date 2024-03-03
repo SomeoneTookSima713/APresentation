@@ -42,9 +42,11 @@ egui = "0.23"
 meval = "0.2"
 chrono = "0.4"
 regex = "1"
+mlua = { version = "0.9", features = ["luajit", "vendored"] }
 
 serde = { version = "1.0", features = ["derive"] }
 deser-hjson = "2.1.0"
+serde_json = "1"
 
 anyhow = "1.0"
 lazy_static = "1.4"

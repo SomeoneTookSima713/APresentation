@@ -20,6 +20,8 @@ pub trait Renderable: Debug {
     /// Basically a copy of the [`Clone::clone`] function because this trait wouldn't be object
     /// safe anymore if I'd require the [`Clone`] trait to be implemented
     fn copy<'b>(&self) -> Box<dyn Renderable + 'b>;
+
+    fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> HashMap<String, mlua::Value<'lua>>;
 }
 
 /// A wrapper for a reference to any object implementing [`Renderable`]
@@ -61,6 +63,10 @@ impl<'a> Renderable for RenderableRef<'a> {
             Box::from_raw(result_ptr)
         }
     }
+
+    fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> HashMap<String, mlua::Value<'lua>> {
+        self.reference.to_lua(lua)
+    }
 }
 impl<'a> Debug for RenderableRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -100,6 +106,15 @@ impl<'a> BaseProperties<'a> {
             alignment: Alignment::try_from(alignment.into())?,
         })
     }
+
+    pub fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> anyhow::Result<HashMap<String, mlua::Value<'lua>>> {
+        let mut hm = HashMap::new();
+        hm.insert("pos".to_owned(), mlua::Value::UserData(lua.create_userdata(&self.pos).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?));
+        hm.insert("size".to_owned(), mlua::Value::UserData(lua.create_userdata(&self.size).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?));
+        hm.insert("color".to_owned(), mlua::Value::UserData(lua.create_userdata(&self.color).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?));
+        hm.insert("alignment".to_owned(), mlua::Value::String(lua.create_string(self.alignment.to_string())?));
+        Ok(hm)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -108,8 +123,10 @@ pub struct ColoredRect<'a> {
 }
 impl<'a> Renderable for ColoredRect<'a> {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
+        let object_repr = self.to_lua(crate::LUA_INSTANCE.get().unwrap());
+
         let view_size = context.get_view_size();
-        let color_eval = self.base.color.evaluate_arr(view_size[0], view_size[1], time);
+        let color_eval = self.base.color.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?;
         let pos_eval = self.base.pos.evaluate_tuple(view_size[0], view_size[1], time);
         let size_eval = self.base.size.evaluate_tuple(view_size[0], view_size[1], time);
         // Convert the alignment to scalar values.
@@ -133,6 +150,10 @@ impl<'a> Renderable for ColoredRect<'a> {
             let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
             Box::from_raw(result_ptr)
         }
+    }
+
+    fn to_lua(&self) -> HashMap<String, mlua::Value> {
+        todo!()
     }
 }
 impl<'a> ColoredRect<'a> {
@@ -809,7 +830,7 @@ impl<'a> Renderable for Text<'a> {
                         false => font_instance = &mut font_borrow.base_font
                     }
 
-                    let mut part_size = font_instance.size(text.clone(), part_font_size);
+                    let part_size = font_instance.size(text.clone(), part_font_size);
 
                     if *italic {
                         // part_size.0 += part_font_size * ITALIC_ADVANCE_FAC/2.0;
