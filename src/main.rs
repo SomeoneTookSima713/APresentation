@@ -2,6 +2,7 @@
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(auto_traits)]
 #![feature(negative_impls)]
+#![feature(array_try_map)]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

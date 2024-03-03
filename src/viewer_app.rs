@@ -69,8 +69,8 @@ impl AppData {
 
                 // let face = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).expect("couldn't parse default font's data");
 
-                let base_font = crate::render::font::Font::from_bytes(bytes.to_vec(), 0).expect("couldn't parse default font's data");
-                let bold_font = crate::render::font::Font::from_bytes(bytes.to_vec(), 0).expect("couldn't parse default font's data");
+                let base_font = crate::render::font::Font::from_bytes(bytes.to_vec(), 0, "Default (bundled)".to_owned()).expect("couldn't parse default font's data");
+                let bold_font = crate::render::font::Font::from_bytes(bytes.to_vec(), 0, "Default (bundled)".to_owned()).expect("couldn't parse default font's data");
 
                 map.insert("Default".to_owned(), RefCell::new(presentation::TextFont { base_font, bold_font }));
             }

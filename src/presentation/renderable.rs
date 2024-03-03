@@ -13,7 +13,7 @@ use super::util; use util::{ ExprVector, Alignment, PropertyError };
 /// This trait defines shared behaviour for any object of a slide that should be rendered to the
 /// screen (referred to in this project as `Renderable objects` or `objects`).
 pub trait Renderable: Debug {
-    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics);
+    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) -> anyhow::Result<()>;
 
     fn get_base_properties(&self) -> &BaseProperties<'_>;
 
@@ -21,7 +21,7 @@ pub trait Renderable: Debug {
     /// safe anymore if I'd require the [`Clone`] trait to be implemented
     fn copy<'b>(&self) -> Box<dyn Renderable + 'b>;
 
-    fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> HashMap<String, mlua::Value<'lua>>;
+    fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> anyhow::Result<HashMap<String, mlua::Value<'lua>>>;
 }
 
 /// A wrapper for a reference to any object implementing [`Renderable`]
@@ -48,8 +48,8 @@ impl<'a, R: Renderable> From<&'a once_cell::sync::Lazy<R>> for RenderableRef<'a>
     }
 }
 impl<'a> Renderable for RenderableRef<'a> {
-    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
-        self.reference.render(time, context, opengl);
+    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) -> anyhow::Result<()> {
+        self.reference.render(time, context, opengl)
     }
 
     fn get_base_properties(&self) -> &BaseProperties<'_> {
@@ -64,7 +64,7 @@ impl<'a> Renderable for RenderableRef<'a> {
         }
     }
 
-    fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> HashMap<String, mlua::Value<'lua>> {
+    fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> anyhow::Result<HashMap<String, mlua::Value<'lua>>> {
         self.reference.to_lua(lua)
     }
 }
@@ -108,10 +108,12 @@ impl<'a> BaseProperties<'a> {
     }
 
     pub fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> anyhow::Result<HashMap<String, mlua::Value<'lua>>> {
+        use mlua::IntoLua;
+
         let mut hm = HashMap::new();
-        hm.insert("pos".to_owned(), mlua::Value::UserData(lua.create_userdata(&self.pos).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?));
-        hm.insert("size".to_owned(), mlua::Value::UserData(lua.create_userdata(&self.size).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?));
-        hm.insert("color".to_owned(), mlua::Value::UserData(lua.create_userdata(&self.color).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?));
+        hm.insert("pos".to_owned(), (&self.pos).clone().into_lua(lua).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?);
+        hm.insert("size".to_owned(), (&self.size).clone().into_lua(lua).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?);
+        hm.insert("color".to_owned(), (&self.color).clone().into_lua(lua).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?);
         hm.insert("alignment".to_owned(), mlua::Value::String(lua.create_string(self.alignment.to_string())?));
         Ok(hm)
     }
@@ -122,21 +124,32 @@ pub struct ColoredRect<'a> {
     base: BaseProperties<'a>
 }
 impl<'a> Renderable for ColoredRect<'a> {
-    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
-        let object_repr = self.to_lua(crate::LUA_INSTANCE.get().unwrap());
+    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) -> anyhow::Result<()> {
+        let object_repr = self.to_lua(crate::LUA_INSTANCE.get().unwrap())?;
+
+        fn expr_to_f(e: util::ExprEval) -> Option<f64> {
+            match e {
+                util::ExprEval::F64(f) => Some(f),
+                util::ExprEval::String(_) => None
+            }
+        }
 
         let view_size = context.get_view_size();
-        let color_eval = self.base.color.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?;
-        let pos_eval = self.base.pos.evaluate_tuple(view_size[0], view_size[1], time);
-        let size_eval = self.base.size.evaluate_tuple(view_size[0], view_size[1], time);
+        let color_eval = self.base.color.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?
+            .try_map(expr_to_f).ok_or(anyhow::anyhow!("Value returned from lua expression wasn't a number!"))?;
+        let pos_eval = self.base.pos.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?
+            .try_map(expr_to_f).ok_or(anyhow::anyhow!("Value returned from lua expression wasn't a number!"))?;
+        let size_eval = self.base.size.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?
+            .try_map(expr_to_f).ok_or(anyhow::anyhow!("Value returned from lua expression wasn't a number!"))?;
         // Convert the alignment to scalar values.
         //   Subtracting the size of the object multiplied by this value from the position of the
         //   object correctly positions it relative to it's pivot.
         let alignment: (f64, f64) = self.base.alignment.into();
         graphics::rectangle(
             [color_eval[0] as f32, color_eval[1] as f32, color_eval[2] as f32, color_eval[3] as f32],
-            [pos_eval.0-size_eval.0*alignment.0,pos_eval.1-size_eval.1*alignment.1,size_eval.0,size_eval.1],
+            [pos_eval[0]-size_eval[0]*alignment.0,pos_eval[1]-size_eval[1]*alignment.1,size_eval[0],size_eval[1]],
             context.transform, opengl);
+        Ok(())
     }
 
     fn get_base_properties(&self) -> &BaseProperties<'_> {
@@ -152,8 +165,8 @@ impl<'a> Renderable for ColoredRect<'a> {
         }
     }
 
-    fn to_lua(&self) -> HashMap<String, mlua::Value> {
-        todo!()
+    fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> anyhow::Result<HashMap<String, mlua::Value<'lua>>> {
+        self.base.to_lua(lua)
     }
 }
 impl<'a> ColoredRect<'a> {
@@ -169,23 +182,34 @@ pub struct RoundedRect<'a> {
 }
 
 impl<'a> Renderable for RoundedRect<'a> {
-    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
+    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) -> anyhow::Result<()> {
         use graphics::Graphics;
+        let object_repr = self.to_lua(crate::LUA_INSTANCE.get().unwrap())?;
+
+        fn expr_to_f(e: util::ExprEval) -> Option<f64> {
+            match e {
+                util::ExprEval::F64(f) => Some(f),
+                util::ExprEval::String(_) => None
+            }
+        }
 
         let view_size = context.get_view_size();
-        let color_eval = self.base.color.evaluate_arr(view_size[0], view_size[1], time);
-        let color_arr = [color_eval[0] as f32, color_eval[1] as f32, color_eval[2] as f32, color_eval[3] as f32];
-        let mut pos_eval = self.base.pos.evaluate_tuple(view_size[0], view_size[1], time);
-        let size_eval = self.base.size.evaluate_tuple(view_size[0], view_size[1], time);
-        let corner_rounding_eval = self.corner_rounding.evaluate(view_size[0], view_size[1], time);
+        let color_arr = self.base.color.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?
+            .try_map(expr_to_f).ok_or(anyhow::anyhow!("Value returned from lua expression wasn't a number!"))?;
+        let mut pos_eval = self.base.pos.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?
+            .try_map(expr_to_f).ok_or(anyhow::anyhow!("Value returned from lua expression wasn't a number!"))?;
+        let size_eval = self.base.size.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?
+            .try_map(expr_to_f).ok_or(anyhow::anyhow!("Value returned from lua expression wasn't a number!"))?;
+        let corner_rounding_eval = expr_to_f(self.corner_rounding.evaluate(view_size[0], view_size[1], time, &object_repr)?).ok_or(anyhow::anyhow!("Value returned from lua expression wasn't a number!"))?;
         let alignment: (f64, f64) = self.base.alignment.into();
         let arc_tri_count: u32 = (corner_rounding_eval as u32 / 2).max(6);
         
-        pos_eval = (pos_eval.0 - size_eval.0 * alignment.0, pos_eval.1 - size_eval.1 * alignment.1);
+        pos_eval = [pos_eval[0] - size_eval[0] * alignment.0, pos_eval[1] - size_eval[1] * alignment.1];
 
-        opengl.tri_list(&context.draw_state, &color_arr, |tri| {
-            graphics::triangulation::with_round_rectangle_tri_list(arc_tri_count, context.transform, [pos_eval.0,pos_eval.1,size_eval.0,size_eval.1], corner_rounding_eval, tri);
+        opengl.tri_list(&context.draw_state, &color_arr.map(|f| f as f32), |tri| {
+            graphics::triangulation::with_round_rectangle_tri_list(arc_tri_count, context.transform, [pos_eval[0],pos_eval[1],size_eval[0],size_eval[1]], corner_rounding_eval, tri);
         });
+        Ok(())
     }
 
     fn get_base_properties<'b>(&'b self) -> &'b BaseProperties<'b> {
@@ -198,6 +222,13 @@ impl<'a> Renderable for RoundedRect<'a> {
             let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
             Box::from_raw(result_ptr)
         }
+    }
+
+    fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> anyhow::Result<HashMap<String, mlua::Value<'lua>>> {
+        use mlua::IntoLua;
+        let mut ret = self.base.to_lua(lua)?;
+        ret.insert("corner_rounding".to_owned(), self.corner_rounding.into_lua(lua)?);
+        Ok(ret)
     }
 }
 impl<'a> RoundedRect<'a> {
@@ -320,6 +351,75 @@ impl<'a, 'font> TextPart<'a, 'font> {
             _ => {}
         }
         Ok(())
+    }
+}
+
+impl<'a, 'font> mlua::UserData for TextPart<'a, 'font> {
+    fn add_fields<'lua, F: mlua::prelude::LuaUserDataFields<'lua, Self>>(fields: &mut F) {
+        use mlua::IntoLua;
+
+        fields.add_field_method_get("type", |lua, s| {
+            match *s {
+                TextPart::NewLine => "Newline".into_lua(lua),
+                TextPart::Placeholder { .. } => "Placeholder".into_lua(lua),
+                TextPart::Space { .. } => "Space".into_lua(lua),
+                TextPart::Tab => "Tab".into_lua(lua),
+                TextPart::Text { .. } => "Text".into_lua(lua),
+            }
+        });
+        fields.add_field_method_get("data", |lua, s| {
+            let mut table = lua.create_table()?;
+
+            match *s {
+                TextPart::Placeholder {
+                    index,
+                    pad_char,
+                    pad_amount,
+                    bold,
+                    italic,
+                    color,
+                    size,
+                    font
+                } => {
+                    table.set("index", index.as_str());
+                    table.set("pad_char", pad_char);
+                    table.set("pad_amount", pad_amount);
+                    table.set("bold", bold);
+                    table.set("italic", italic);
+                    table.set("color", color);
+                    table.set("size", size);
+                    table.set("font_name", font.borrow().base_font.name.as_str());
+                    table.set("bold_font_name", font.borrow().bold_font.name.as_str());
+                },
+                TextPart::Space {
+                    size,
+                    font
+                } => {
+                    table.set("size", size);
+                    table.set("font_name", font.borrow().base_font.name.as_str());
+                    table.set("bold_font_name", font.borrow().bold_font.name.as_str());
+                },
+                TextPart::Text {
+                    text,
+                    bold,
+                    italic,
+                    color,
+                    size,
+                    font
+                } => {
+                    table.set("text", text.as_str());
+                    table.set("bold", bold);
+                    table.set("italic", italic);
+                    table.set("color", color);
+                    table.set("size", size);
+                    table.set("font_name", font.borrow().base_font.name.as_str());
+                    table.set("bold_font_name", font.borrow().bold_font.name.as_str());
+                },
+                _ => {}
+            }
+
+            Ok(table)
+        });
     }
 }
 
@@ -451,7 +551,10 @@ impl<'a> Text<'a> {
 
                 let alpha = match part {
                     TextPart::Text { text: _, bold: _, italic: _, color, size: _, font: _ } => {
-                        color.list[3].base_string.clone()
+                        match color.list[3] {
+                            util::ResolutionDependentExpr::MathExpr { expr, base_string, base_context, base_expr_type } => base_string.clone(),
+                            util::ResolutionDependentExpr::LuaExpr(f, s) => s.clone()
+                        }
                     },
                     _ => "1.0".to_owned()
                 };
@@ -681,16 +784,25 @@ impl<'a> Renderable for Text<'a> {
         }
     }
 
-    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
+    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) -> anyhow::Result<()> {
         const ITALIC_ADVANCE_FAC: f64 = 0.10;
 
+        let object_repr = self.to_lua(crate::LUA_INSTANCE.get().unwrap())?;
+
+        fn expr_to_f(e: util::ExprEval) -> Option<f64> {
+            match e {
+                util::ExprEval::F64(f) => Some(f),
+                util::ExprEval::String(_) => None
+            }
+        }
+
         let view_size = context.get_view_size();
-        let max_width = self.base.size.list[0].evaluate(view_size[0], view_size[1], time);
-        let mut current_pos = self.base.pos.evaluate_tuple(view_size[0], view_size[1], time);
+        let max_width = expr_to_f(self.base.size.list[0].evaluate(view_size[0], view_size[1], time, &object_repr)?).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;
+        let mut current_pos = self.base.pos.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?.try_map(expr_to_f).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;
         let alignment: (f64, f64) = self.base.alignment.into();
         let text_align: f64 = self.text_alignment.multipliers().0;
         
-        let default_size = self.base.size.list[1].evaluate(view_size[0], view_size[1], time);
+        let default_size = expr_to_f(self.base.size.list[1].evaluate(view_size[0], view_size[1], time, &object_repr)?).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;
 
         let mut height = 0.0;
         let mut line_widths: Vec<f64> = Vec::with_capacity(self.text.len()/2+4);
@@ -716,7 +828,7 @@ impl<'a> Renderable for Text<'a> {
                     curr_max_height = default_size;
                 },
                 TextPart::Space { size, font } => {
-                    let part_size = size.evaluate(view_size[0], view_size[1], time);
+                    let part_size = expr_to_f(size.evaluate(view_size[0], view_size[1], time, &object_repr)?).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;;
                     if part_size>curr_max_height { curr_max_height = part_size; }
 
                     let width = font.borrow_mut().base_font.size(" ", part_size).0;
@@ -726,7 +838,7 @@ impl<'a> Renderable for Text<'a> {
                 },
                 TextPart::Text { text, bold, italic, color, size, font } => {
 
-                    let part_size = size.evaluate(view_size[0], view_size[1], time);
+                    let part_size = expr_to_f(size.evaluate(view_size[0], view_size[1], time, &object_repr)?).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;
                     if part_size>curr_max_height { curr_max_height = part_size; }
                     let mut part_width;
                     match bold {
@@ -748,7 +860,7 @@ impl<'a> Renderable for Text<'a> {
                 TextPart::Placeholder { index, pad_char, pad_amount, bold, italic, color, size, font } => {
                     match self.placeholders.get(index) {
                         Some(expr) => {
-                            let part_size = size.evaluate(view_size[0], view_size[1], time);
+                            let part_size = expr_to_f(size.evaluate(view_size[0], view_size[1], time, &object_repr)?).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;;
                             if curr_max_height<part_size { curr_max_height = part_size; }
 
                             let mut part_width;
@@ -791,8 +903,8 @@ impl<'a> Renderable for Text<'a> {
 
         let mut current_line: usize = 0;
 
-        let starting_pos = (current_pos.0 - max_width*alignment.0, current_pos.1 - height*alignment.1);
-        current_pos = (starting_pos.0 + (max_width - line_widths[current_line])*text_align, starting_pos.1);
+        let starting_pos = (current_pos[0] - max_width*alignment.0, current_pos[1] - height*alignment.1);
+        current_pos = ([starting_pos.0 + (max_width - line_widths[current_line])*text_align, starting_pos.1]);
 
         // Draw the text
         for part in self.text.iter() {
@@ -805,23 +917,23 @@ impl<'a> Renderable for Text<'a> {
                     }
                     */
                     let size_incs = default_size*12.0;
-                    if (current_pos.0/size_incs).ceil()*size_incs - starting_pos.0 <= max_width {
-                        current_pos.0 = (current_pos.0/size_incs).ceil()*size_incs;
+                    if (current_pos[0]/size_incs).ceil()*size_incs - starting_pos.0 <= max_width {
+                        current_pos[0] = (current_pos[0]/size_incs).ceil()*size_incs;
                     }
                 },
                 TextPart::NewLine => {
-                    current_pos.0 = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
-                    current_pos.1 += line_heights[current_line];
+                    current_pos[0] = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
+                    current_pos[1] += line_heights[current_line];
                     current_line += 1;
                 },
                 TextPart::Space { size, font } => {
-                    let part_size = size.evaluate(view_size[0], view_size[1], time);
+                    let part_size = expr_to_f(size.evaluate(view_size[0], view_size[1], time, &object_repr)?).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;;
                     let width = font.borrow_mut().base_font.size(" ", part_size).0;
-                    current_pos.0 += width as f64;
+                    current_pos[0] += width as f64;
                 },
                 TextPart::Text { text, bold, italic, color, size, font } => {
-                    let part_font_size = size.evaluate(view_size[0], view_size[1], time);
-                    let color_eval = color.evaluate_tuple(view_size[0], view_size[1], time);
+                    let part_font_size = expr_to_f(size.evaluate(view_size[0], view_size[1], time, &object_repr)?).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;
+                    let color_eval = color.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?.try_map(expr_to_f).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;
 
                     let mut font_borrow = font.borrow_mut();
                     let font_instance;
@@ -833,27 +945,26 @@ impl<'a> Renderable for Text<'a> {
                     let part_size = font_instance.size(text.clone(), part_font_size);
 
                     if *italic {
-                        // part_size.0 += part_font_size * ITALIC_ADVANCE_FAC/2.0;
-                        current_pos.0 += part_font_size * ITALIC_ADVANCE_FAC;
+                        current_pos[0] += part_font_size * ITALIC_ADVANCE_FAC;
                     }
 
-                    if current_pos.0 + part_size.0 - starting_pos.0 > max_width {
-                        current_pos.0 = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
-                        current_pos.1 += line_heights[current_line];
+                    if current_pos[0] + part_size.0 - starting_pos.0 > max_width {
+                        current_pos[0] = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
+                        current_pos[1] += line_heights[current_line];
                         current_line += 1;
                     }
 
-                    let ctx = context.trans(current_pos.0, current_pos.1 + line_heights[current_line] - part_font_size);
+                    let ctx = context.trans(current_pos[0], current_pos[1] + line_heights[current_line] - part_font_size);
 
-                    font_instance.draw(text, part_font_size, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl);
+                    font_instance.draw(text, part_font_size, (color_eval[0] as f32, color_eval[1] as f32, color_eval[2] as f32, color_eval[3] as f32), *italic, &ctx, opengl);
 
-                    current_pos.0 += part_size.0;
+                    current_pos[0] += part_size.0;
                 },
                 TextPart::Placeholder { index, pad_char, pad_amount, bold, italic, color, size, font } => {
                     match self.placeholders.get(index) {
                         Some(expr) => {
-                            let part_font_size = size.evaluate(view_size[0], view_size[1], time);
-                            let color_eval = color.evaluate_tuple(view_size[0], view_size[1], time);
+                            let part_font_size = expr_to_f(size.evaluate(view_size[0], view_size[1], time, &object_repr)?).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;;
+                            let color_eval = color.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?.try_map(expr_to_f).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;
 
                             let val = expr.call(view_size[0], view_size[1], time);
 
@@ -878,23 +989,33 @@ impl<'a> Renderable for Text<'a> {
                                 part_size.0 += part_font_size * ITALIC_ADVANCE_FAC;
                             }
 
-                            if current_pos.0 + part_size.0 - starting_pos.0 > max_width {
-                                current_pos.0 = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
-                                current_pos.1 += line_heights[current_line];
+                            if current_pos[0] + part_size.0 - starting_pos.0 > max_width {
+                                current_pos[0] = starting_pos.0 + (max_width - line_widths[current_line])*text_align;
+                                current_pos[1] += line_heights[current_line];
                                 current_line += 1;
                             }
 
-                            let ctx = context.trans(current_pos.0, current_pos.1 + line_heights[current_line] - part_font_size);
+                            let ctx = context.trans(current_pos[0], current_pos[1] + line_heights[current_line] - part_font_size);
 
-                            font_instance.draw(text, part_font_size, (color_eval.0 as f32, color_eval.1 as f32, color_eval.2 as f32, color_eval.3 as f32), *italic, &ctx, opengl);
+                            font_instance.draw(text, part_font_size, (color_eval[0] as f32, color_eval[1] as f32, color_eval[2] as f32, color_eval[3] as f32), *italic, &ctx, opengl);
 
-                            current_pos.0 += part_size.0;
+                            current_pos[0] += part_size.0;
                         },
                         None => {}
                     }
                 }
             }
         }
+        Ok(())
+    }
+
+    fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> anyhow::Result<HashMap<String, mlua::Value<'lua>>> {
+        use mlua::IntoLua;
+        let mut ret = self.base.to_lua(lua)?;
+
+        ret.insert("text".to_owned(), self.text.into_lua(lua)?);
+
+        Ok(ret)
     }
 }
 
@@ -941,21 +1062,32 @@ impl<'a> Image<'a> {
 }
 
 impl<'a> Renderable for Image<'a> {
-    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) {
+    fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) -> anyhow::Result<()> {
         use graphics::DrawState;
 
+        let object_repr = self.to_lua(crate::LUA_INSTANCE.get().unwrap())?;
+
+        fn expr_to_f(e: util::ExprEval) -> Option<f64> {
+            match e {
+                util::ExprEval::F64(f) => Some(f),
+                util::ExprEval::String(_) => None
+            }
+        }
+
         let view_size = context.get_view_size();
-        let pos_eval = self.base.pos.evaluate_tuple(view_size[0], view_size[1], time);
-        let size_eval = self.base.size.evaluate_tuple(view_size[0], view_size[1], time);
-        let col_eval = self.base.color.evaluate_arr(view_size[0], view_size[1], time).map(|f|f as f32);
+        let pos_eval = self.base.pos.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?.try_map(expr_to_f).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;
+        let size_eval = self.base.size.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?.try_map(expr_to_f).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?;
+        let col_eval = self.base.color.evaluate_arr(view_size[0], view_size[1], time, &object_repr)?.try_map(expr_to_f).ok_or(anyhow::anyhow!("Lua expression didn't return a number!"))?.map(|f|f as f32);
         let alignment: (f64, f64) = self.base.alignment.into();
 
-        let rect = ImageRect::new().rect([pos_eval.0-size_eval.0*alignment.0,pos_eval.1-size_eval.1*alignment.1,size_eval.0,size_eval.1]).color(col_eval);
+        let rect = ImageRect::new().rect([pos_eval[0]-size_eval[0]*alignment.0,pos_eval[1]-size_eval[1]*alignment.1,size_eval[0],size_eval[1]]).color(col_eval);
 
         let lock = IMAGE_TEXTURES.read().unwrap();
         let texture = lock.get(self.texture).unwrap();
 
         rect.draw(texture, &DrawState::default(), context.transform, opengl);
+
+        Ok(())
     }
 
     fn get_base_properties(&self) -> &BaseProperties<'_> {
@@ -968,5 +1100,14 @@ impl<'a> Renderable for Image<'a> {
             let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
             Box::from_raw(result_ptr)
         }
+    }
+
+    fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> anyhow::Result<HashMap<String, mlua::Value<'lua>>> {
+        use mlua::IntoLua;
+        let mut ret = self.base.to_lua(lua)?;
+
+        ret.insert("texture".to_owned(), (&self.texture_path).into_lua(lua)?);
+
+        Ok(ret)
     }
 }

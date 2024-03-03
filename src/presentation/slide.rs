@@ -26,6 +26,11 @@ pub const DEFAULT_BACKGROUND_RENDERABLE: Lazy<renderable::ColoredRect> = Lazy::n
             PropertyError::BadAlignment => panic!("{err_begin} Invalid alignment! {err_end}"),
             PropertyError::MismatchedExprCount => panic!("{err_begin} Invalid expression count! {err_end}"),
             PropertyError::SyntaxError(_, prop, spec) => panic!("{err_begin} Error in field {prop}: {} {err_end}",spec.unwrap_or("No furhter information given.".to_owned())),
+            PropertyError::LuaError(e) => panic!("{err_begin} Lua error: {e} {err_end}"),
+            PropertyError::MultiError(e) => panic!("{err_begin} Multiple errors occured (probably while parsing an expression): \n{:#?}\n {err_end}",e.iter().map(|e|{
+                let (a,b,c) = e.syntax_error("Unknown", "Unknown", "No Description");
+                format!("Renderable: {a} | Property: {b} | Error description: {c}")
+            }).collect::<Vec<_>>()),
         }
     };
     renderable::ColoredRect::new(properties)
@@ -120,7 +125,9 @@ impl Slide {
         //   has it's items sorted by z-index (it is sorted upon creationg and gets re-sorted when
         //   inserting an object with a new z-index).
         for (_, vec) in self.objects.iter() {
-            vec.iter().for_each(|renderable| renderable.render(time, context, opengl));
+            for renderable in vec.iter() {
+                renderable.render(time, context, opengl);
+            }
         }
     }
 }

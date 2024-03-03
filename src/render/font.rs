@@ -19,6 +19,7 @@ pub const ITALIC_FAC: f64 = 0.15;
 // #[derive(Clone)]
 pub struct Font {
     pub bases: Vec<(fontdue::Font, f32)>,
+    pub name: String,
     cached_glyphs: HashMap<(char, u32), (Texture, Metrics)>
 }
 
@@ -26,6 +27,8 @@ pub struct Font {
 impl Font {
     pub fn new<P: AsRef<Path>, F: Into<DefaultingOption<isize>>>(path: P, face_index: F) -> Option<Font> {
         let face_index_option: DefaultingOption<isize> = face_index.into();
+
+        let name = path.as_ref().to_string_lossy().to_string();
 
         let bytes = std::fs::read(path.as_ref()).ok()?;
         let face_ind = face_index_option.consume(0);
@@ -37,11 +40,11 @@ impl Font {
 
         match faces.len() {
             0 => None,
-            _ => Some(Font { bases: faces, cached_glyphs: HashMap::with_capacity(MAX_FONT_COUNT * 40) })
+            _ => Some(Font { bases: faces, name, cached_glyphs: HashMap::with_capacity(MAX_FONT_COUNT * 40) })
         }
     }
 
-    pub fn from_bytes(bytes: Vec<u8>, face_index: isize) -> Option<Font> {
+    pub fn from_bytes(bytes: Vec<u8>, face_index: isize, name: String) -> Option<Font> {
         let face_sizes: [f32; (FONT_SCALE.1 - FONT_SCALE.0) as usize] = std::array::from_fn(|i| FONT_SCALE.0 + i as f32);
         let faces: Vec<(fontdue::Font, f32)> = face_sizes.into_iter().step_by(FONT_SCALE.2 as usize).filter_map(|size| {
             fontdue::Font::from_bytes(bytes.as_slice(), fontdue::FontSettings { collection_index: face_index as u32, scale: size }).ok().map(|font| (font, size))
@@ -49,7 +52,7 @@ impl Font {
 
         match faces.len() {
             0 => None,
-            _ => Some(Font { bases: faces, cached_glyphs: HashMap::with_capacity(MAX_FONT_COUNT * 40) })
+            _ => Some(Font { bases: faces, name, cached_glyphs: HashMap::with_capacity(MAX_FONT_COUNT * 40) })
         }
     }
 

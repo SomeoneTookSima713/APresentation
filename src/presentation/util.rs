@@ -22,18 +22,56 @@ pub enum PropertyError {
     /// The first string is the name of the Renderable, the second is the name of the affected
     /// property and the optional third string is a more precise description of the error.
     SyntaxError(String, String, Option<String>),
-
-    LuaError(mlua::Error)
+    /// This error indicates that something went wrong doing something lua-related.
+    LuaError(mlua::Error),
+    /// This error is a collection of errors, in case multiple things could have gone wrong or
+    /// there are multiple possible causes for the program not working.
+    MultiError(Vec<PropertyError>)
 }
 impl PropertyError {
     /// Returns the values of a syntax error, converting all non-syntax related errors to syntax
     /// errors and adding a description if one is missing, both using the supplied default values.
-    pub fn syntax_error<S: Into<String>>(&self, rtype: S, property: S, desc: S) -> (String, String, String) {
+    pub fn syntax_error<S: AsRef<str>>(&self, rtype: S, property: S, desc: S) -> (String, String, String) {
+        let rtype: &str = rtype.as_ref();
+        let property: &str = property.as_ref();
+        let desc: &str = desc.as_ref();
+
+        fn me_rends<S: AsRef<str> + Copy>(errors: &Vec<PropertyError>, rtype: S, property: S, desc: S) -> String {
+            errors.iter().map(|e|e.syntax_error(rtype, property, desc).0).collect::<Vec<_>>().join(" / ")
+        }
+        fn me_props<S: AsRef<str> + Copy>(errors: &Vec<PropertyError>, rtype: S, property: S, desc: S) -> String {
+            errors.iter().map(|e|e.syntax_error(rtype, property, desc).1).collect::<Vec<_>>().join(" / ")
+        }
+        fn me_descs<S: AsRef<str> + Copy>(errors: &Vec<PropertyError>, rtype: S, property: S, desc: S) -> String {
+            errors.iter().map(|e|e.syntax_error(rtype, property, desc).2).collect::<Vec<_>>().join(" / ")
+        }
+
         match self {
-            Self::MismatchedExprCount => (rtype.into(), property.into(), "Mismatched expression count!".to_owned()),
-            Self::BadAlignment => (rtype.into(),property.into(), "Invalid alignment string!".to_owned()),
-            Self::SyntaxError(t, p, d) => (t.clone(), p.clone(), d.as_ref().unwrap_or(&<S as Into<String>>::into(desc)).to_owned()),
-            Self::LuaError(e) => (rtype.into(), property.into(), e.to_string())
+            Self::MismatchedExprCount => (
+                rtype.to_owned(),
+                property.to_owned(),
+                "Mismatched expression count!".to_owned()
+            ),
+            Self::BadAlignment => (
+                rtype.to_owned(),
+                property.to_owned(),
+                "Invalid alignment string!".to_owned()
+            ),
+            Self::SyntaxError(t, p, d) => (
+                t.clone(),
+                p.clone(),
+                d.as_ref().map(|s|s.as_str()).unwrap_or(desc).to_owned()
+            ),
+            Self::LuaError(e) => (
+                rtype.to_owned(),
+                property.to_owned(),
+                e.to_string()
+            ),
+            Self::MultiError(errors) => (
+                me_rends(errors, rtype, property, desc),
+                me_props(errors, rtype, property, desc),
+                me_descs(errors, rtype, property, desc)
+            )
         }
     }
 }
@@ -232,7 +270,7 @@ pub enum ResolutionDependentExpr<'a> {
         /// When it equals [`ResExprType::HeightBased`], percent signs get replaced with `/100*h`.
         base_expr_type: ResExprType
     },
-    LuaExpr(mlua::Function<'static>)
+    LuaExpr(mlua::Function<'static>, String)
 }
 
 impl<'a> Clone for ResolutionDependentExpr<'a> {
@@ -240,10 +278,10 @@ impl<'a> Clone for ResolutionDependentExpr<'a> {
         match self {
             Self::MathExpr { expr: _, base_string, base_context, base_expr_type } => {
                 // Reconstruct the expression
-                res_dependent_expr(base_string, base_context, *base_expr_type).unwrap_or_else(|_|panic!("Reconstruction of an expression failed! This shouldn't happen!"))
+                res_dependent_expr(base_string.clone(), base_context.clone(), *base_expr_type).unwrap_or_else(|_|panic!("Reconstruction of an expression failed! This shouldn't happen!"))
             },
-            Self::LuaExpr(func) => {
-                Self::LuaExpr(func.clone())
+            Self::LuaExpr(func, func_str) => {
+                Self::LuaExpr(func.clone(), func_str.clone())
             }
         }
     }
@@ -272,8 +310,8 @@ impl<'a> Debug for ResolutionDependentExpr<'a> {
             Self::MathExpr { expr: _, base_string, base_context: _, base_expr_type: _ } => {
                 write!(f, "ResolutionDependentExpr({})", base_string)
             },
-            Self::LuaExpr(func) => {
-                write!(f,"ResolutionDependentExpr({:?})",func)
+            Self::LuaExpr(func, str) => {
+                write!(f,"ResolutionDependentExpr({str})")
             }
         }
     }
@@ -285,11 +323,12 @@ impl<'a> ResolutionDependentExpr<'a> {
             Self::MathExpr { expr, base_string: _, base_context: _, base_expr_type: _ } => {
                 Ok(ExprEval::F64((expr)(width,height,time)))
             },
-            Self::LuaExpr(func) => {
+            Self::LuaExpr(func, _) => {
                 use mlua::FromLuaMulti;
 
-                let val: mlua::MultiValue = func.call(object)?;
-                if let Ok(str) = String::from_lua_multi(val, crate::LUA_INSTANCE.get().unwrap()) {
+                // TODO: Replace this clone, as it's getting called every frame and clones a HashMap.
+                let val: mlua::MultiValue = func.call(object.clone())?;
+                if let Ok(str) = String::from_lua_multi(val.clone(), crate::LUA_INSTANCE.get().unwrap()) {
                     Ok(ExprEval::String(str))
                 } else if let Ok(float) = f64::from_lua_multi(val, crate::LUA_INSTANCE.get().unwrap()) {
                     Ok(ExprEval::F64(float))
@@ -325,7 +364,7 @@ pub struct ExprVector<'a, const N: usize> {
 impl<'a, const N: usize> mlua::UserData for ExprVector<'a, N> {
     fn add_methods<'lua, M: mlua::prelude::LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("evaluate", |lua, s, args: (f64, f64, f64, HashMap<String, mlua::Value>)| {
-            s.evaluate_arr(args.0, args.1, args.2, args.3)
+            s.evaluate_arr(args.0, args.1, args.2, &args.3)
                 .map(|arr| Vec::from(arr))
                 .map_err(|e| mlua::Error::runtime(e.to_string()))
         });
@@ -335,7 +374,7 @@ impl<'a, const N: usize> mlua::UserData for ExprVector<'a, N> {
 impl<'a, const N: usize> mlua::UserData for &'a ExprVector<'a, N> {
     fn add_methods<'lua, M: mlua::prelude::LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("evaluate", |lua, s, args: (f64, f64, f64, HashMap<String, mlua::Value>)| {
-            s.evaluate_arr(args.0, args.1, args.2, args.3)
+            s.evaluate_arr(args.0, args.1, args.2, &args.3)
                 .map(|arr| Vec::from(arr))
                 .map_err(|e| mlua::Error::runtime(e.to_string()))
         });
@@ -380,7 +419,7 @@ impl<'a, const N: usize> TryFrom<Vec<ResolutionDependentExpr<'a>>> for ExprVecto
 
 impl<'a, const N: usize> ExprVector<'a, N> {
     /// Evaluates all expressions into an array of size `N`
-    pub fn evaluate_arr(&self, width: f64, height: f64, time: f64, object: HashMap<String, mlua::Value>) -> anyhow::Result<[ExprEval; N]> {
+    pub fn evaluate_arr(&self, width: f64, height: f64, time: f64, object: &HashMap<String, mlua::Value>) -> anyhow::Result<[ExprEval; N]> {
         let mut errors = Vec::new();
 
         let rval: [ExprEval; N] = self.list.iter().map(|v| v.evaluate(width, height, time, object).unwrap_or_else(|e| {
@@ -397,13 +436,13 @@ impl<'a, const N: usize> ExprVector<'a, N> {
 }
 impl<'a> ExprVector<'a, 2> {
     /// Evaluates all expressions into a tuple of 2 elements.
-    pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64, object: HashMap<String, mlua::Value>) -> (anyhow::Result<ExprEval>, anyhow::Result<ExprEval>) {
+    pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64, object: &HashMap<String, mlua::Value>) -> (anyhow::Result<ExprEval>, anyhow::Result<ExprEval>) {
         (self.list[0].evaluate(width, height, time, object),self.list[1].evaluate(width, height, time, object))
     }
 }
 impl<'a> ExprVector<'a, 3> {
     /// Evaluates all expressions into a tuple of 3 elements.
-    pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64, object: HashMap<String, mlua::Value>) -> (anyhow::Result<ExprEval>, anyhow::Result<ExprEval>, anyhow::Result<ExprEval>) {
+    pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64, object: &HashMap<String, mlua::Value>) -> (anyhow::Result<ExprEval>, anyhow::Result<ExprEval>, anyhow::Result<ExprEval>) {
         (
             self.list[0].evaluate(width, height, time, object),
             self.list[1].evaluate(width, height, time, object),
@@ -413,7 +452,7 @@ impl<'a> ExprVector<'a, 3> {
 }
 impl<'a> ExprVector<'a, 4> {
     /// Evaluates all expressions into a tuple of 4 elements.
-    pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64, object: HashMap<String, mlua::Value>) -> (anyhow::Result<ExprEval>, anyhow::Result<ExprEval>, anyhow::Result<ExprEval>, anyhow::Result<ExprEval>) {
+    pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64, object: &HashMap<String, mlua::Value>) -> (anyhow::Result<ExprEval>, anyhow::Result<ExprEval>, anyhow::Result<ExprEval>, anyhow::Result<ExprEval>) {
         (
             self.list[0].evaluate(width, height, time, object),
             self.list[1].evaluate(width, height, time, object),
@@ -453,26 +492,29 @@ impl ResExprType {
 pub fn res_dependent_expr<'a, S: Into<String>>(expr: S, context: &'a Context, expr_type: ResExprType) -> Result<ResolutionDependentExpr<'a>, PropertyError> {
     const EMPTY: String = String::new();
 
+    let exprstr: String = expr.into();
+
     // Replace percent sign to be able to parse it with meval's parser.
-    let string = <S as Into<String>>::into(expr).replace("%", &("/100*".to_owned()+expr_type.str()));
+    let mstring = exprstr.replace("%", &("/100*".to_owned()+expr_type.str()));
+    let lstring = exprstr;
 
     use meval::{ Error, FuncEvalError, ParseError, RPNError };
 
     // Parse the expression and bind it to a function with three arguments
     // (the window's dimensions and time)
-    let parsed_expr = string.clone().parse::<Expr>().map_err(|e| {
+    let parsed_expr = mstring.clone().parse::<Expr>().map_err(|e| {
         let errdesc: String = match e {
             Error::ParseError(errtype) => {
                 match errtype {
                     ParseError::MissingArgument => format!("Expression Parsing error: Missing argument at end of the expression!"),
                     ParseError::MissingRParen(n) => format!("Expression Parsing error: {n} missing right parentheses!"),
                     ParseError::UnexpectedToken(n) => {
-                        let mut indicatorstr: String = String::with_capacity(string.len()+4);
+                        let mut indicatorstr: String = String::with_capacity(n+6);
                         for _ in 0..n {
                             indicatorstr.push(' ');
                         }
                         indicatorstr.push_str("^ Here");
-                        format!("Expression Parsing error: Unexpected token at position {n}:\n\t{}\n\t{indicatorstr}",string.clone())
+                        format!("Expression Parsing error: Unexpected token at position {n}:\n\t{}\n\t{indicatorstr}",mstring.clone())
                     }
                 }
             },
@@ -480,8 +522,9 @@ pub fn res_dependent_expr<'a, S: Into<String>>(expr: S, context: &'a Context, ex
         };
         PropertyError::SyntaxError(EMPTY.clone(), EMPTY.clone(), Some(errdesc))
     })?;
+    let mut math_error = None;
     match parsed_expr.bind3_with_context(context, "w", "h", "t") {
-        Ok(e) => Ok(ResolutionDependentExpr::MathExpr { expr: Box::new(e), base_string: string, base_context: context, base_expr_type: expr_type }),
+        Ok(e) => { return Ok(ResolutionDependentExpr::MathExpr { expr: Box::new(e), base_string: mstring, base_context: context, base_expr_type: expr_type }) },
         Err(err) => {
             let errdesc = match err {
                 Error::Function(name, errtype) => match errtype {
@@ -493,26 +536,42 @@ pub fn res_dependent_expr<'a, S: Into<String>>(expr: S, context: &'a Context, ex
                 Error::ParseError(errtype) => match errtype {
                     ParseError::MissingArgument => format!("Missing operator or missing function argument at the end of the expression!"),
                     ParseError::MissingRParen(num) => match num { 1=> "1 missing right parenthesis!".to_owned(), _ => format!("{num} missing right parentheses!")},
-                    ParseError::UnexpectedToken(pos) => format!("Unexpected token at position {pos}: \"...{}...\"", &string[(pos-2).max(0)..(pos+2).min(string.len()-1)]),
+                    ParseError::UnexpectedToken(pos) => format!("Unexpected token at position {pos}: \"...{}...\"", &mstring[(pos-2).max(0)..(pos+2).min(mstring.len()-1)]),
                 },
                 Error::RPNError(errtype) => match errtype {
-                    RPNError::MismatchedLParen(pos) => format!("Unmatched left parenthesis at position {pos}: \"...{}...\"", &string[(pos-2).max(0)..(pos+2).min(string.len()-1)]),
-                    RPNError::MismatchedRParen(pos) => format!("Unmatched right parenthesis at position {pos}: \"...{}...\"", &string[(pos-2).max(0)..(pos+2).min(string.len()-1)]),
-                    RPNError::NotEnoughOperands(pos) => format!("Too few operands at position {pos}: \"...{}...\"", &string[(pos-2).max(0)..(pos+2).min(string.len()-1)]),
+                    RPNError::MismatchedLParen(pos) => format!("Unmatched left parenthesis at position {pos}: \"...{}...\"", &mstring[(pos-2).max(0)..(pos+2).min(mstring.len()-1)]),
+                    RPNError::MismatchedRParen(pos) => format!("Unmatched right parenthesis at position {pos}: \"...{}...\"", &mstring[(pos-2).max(0)..(pos+2).min(mstring.len()-1)]),
+                    RPNError::NotEnoughOperands(pos) => format!("Too few operands at position {pos}: \"...{}...\"", &mstring[(pos-2).max(0)..(pos+2).min(mstring.len()-1)]),
                     RPNError::TooManyOperands => format!("Too many operands!"),
-                    RPNError::UnexpectedComma(pos) => format!("Unexpected comma at position {pos}: \"...{}...\"", &string[(pos-2).max(0)..(pos+2).min(string.len()-1)]),
+                    RPNError::UnexpectedComma(pos) => format!("Unexpected comma at position {pos}: \"...{}...\"", &mstring[(pos-2).max(0)..(pos+2).min(mstring.len()-1)]),
                 },
                 Error::UnknownVariable(name) => format!("Unknown variable '{name}'!")
             };
-            Err(PropertyError::SyntaxError(EMPTY.clone(), EMPTY.clone(), Some(errdesc)))
+            math_error = Some(PropertyError::SyntaxError(EMPTY.clone(), EMPTY.clone(), Some(errdesc)));
         }
     }
+
+    // If this part of the function is getting executed, we know the expression
+    // isn't valid as a math expression, thus we'll try to parse it as a lua
+    // snippet.
+
+    let mut lua_error = None;
+
+    match lua_expr(&lstring) {
+        Ok(f) => { return Ok(f) },
+        Err(e) => lua_error = Some(e)
+    }
+
+    // If neither the math parser's match arm nor the lua parser's match arm
+    // returned a value, we know that whichever expression type the user chose
+    // contains an invalid expression
+    Err(PropertyError::MultiError(vec![math_error.unwrap(), lua_error.unwrap()]))
 }
 
 pub fn lua_expr<S: Into<String>>(expr: S) -> Result<ResolutionDependentExpr<'static>, PropertyError> {
     let str = expr.into();
     crate::LUA_INSTANCE.get().unwrap().load(&str).into_function()
-        .map(|f| ResolutionDependentExpr::LuaExpr(f))
+        .map(|f| ResolutionDependentExpr::LuaExpr(f, str))
         .map_err(|e| PropertyError::LuaError(e))
 }
 
