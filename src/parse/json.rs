@@ -344,7 +344,7 @@ use crate::presentation::util::PropertyError;
 #[derive(Debug)]
 pub struct Document(pub Vec<SlideData>);
 impl Document {
-    fn parse_base_properties<'a, E: serde::de::Error>(map: &HashMap<String, JSONValue>, renderable_type: String) -> Result<BaseProperties<'a>, E> {
+    fn parse_base_properties<E: serde::de::Error>(map: &HashMap<String, JSONValue>, renderable_type: String) -> Result<BaseProperties, E> {
         let err = serde::de::Error::custom;
 
         let merr = |renderable: String, property: Option<String>, desc: String| move |e: PropertyError|{
@@ -585,7 +585,7 @@ impl<'de> Deserialize<'de> for DocumentFonts {
 }
 
 use once_cell::sync::Lazy;
-type FnRenderableParse<'a> = Box<dyn Fn(HashMap<String, JSONValue>, BaseProperties<'a>) -> Result<Box<dyn Renderable>, String>>;
+type FnRenderableParse = Box<dyn Fn(HashMap<String, JSONValue>, BaseProperties) -> Result<Box<dyn Renderable>, String>>;
 /// A [`HashMap`] of functions for parsing each type of [`Renderable`].
 /// 
 /// The index defines the name of the type.
@@ -620,13 +620,13 @@ where
 /// Also contains some helper functions related to [`Renderable`]s that can be parsed from JSON.
 trait FromJson<'a> {
     /// Parses JSON-data and into itself
-    fn from_json<E: serde::de::Error>(dict: &'a HashMap<String, JSONValue>, base: BaseProperties<'a>) -> Result<Self, E>
+    fn from_json<E: serde::de::Error>(dict: &'a HashMap<String, JSONValue>, base: BaseProperties) -> Result<Self, E>
     where Self: Sized;
 
     /// Returns a closure that constructs a Renderable object
-    fn renderable_func<E: serde::de::Error>() -> FnRenderableParse<'a>
+    fn renderable_func<E: serde::de::Error>() -> FnRenderableParse
     where Self: Sized + Renderable + 'static {
-        let func = |dict: HashMap<String, JSONValue>, base: BaseProperties<'a>| {
+        let func = |dict: HashMap<String, JSONValue>, base: BaseProperties| {
             match Self::from_json::<E>(&*Box::leak(Box::new(dict)), base) {
                 Ok(s) => Ok(Box::new(s) as Box<dyn Renderable>),
                 Err(e) => Err(format!("{e}"))
@@ -637,8 +637,8 @@ trait FromJson<'a> {
     }
 }
 
-impl<'a> FromJson<'a> for ColoredRect<'a> {
-    fn from_json<E: serde::de::Error>(_hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties<'a>) -> Result<Self, E>
+impl<'a> FromJson<'a> for ColoredRect {
+    fn from_json<E: serde::de::Error>(_hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties) -> Result<Self, E>
     where Self: Sized {
         // Create the struct
         Ok(
@@ -647,8 +647,8 @@ impl<'a> FromJson<'a> for ColoredRect<'a> {
     }
 }
 
-impl<'a> FromJson<'a> for RoundedRect<'a> {
-    fn from_json<E: serde::de::Error>(hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties<'a>) -> Result<Self, E>
+impl<'a> FromJson<'a> for RoundedRect {
+    fn from_json<E: serde::de::Error>(hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties) -> Result<Self, E>
     where Self: Sized {
 
         let merr = |renderable: &'static str, property: Option<&'static str>, desc: &'static str| move |e: PropertyError|{
@@ -676,7 +676,7 @@ impl<'a> FromJson<'a> for RoundedRect<'a> {
 }
 
 impl<'a> FromJson<'a> for Text<'a> {
-    fn from_json<E: serde::de::Error>(hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties<'a>) -> Result<Self, E>
+    fn from_json<E: serde::de::Error>(hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties) -> Result<Self, E>
     where Self: Sized {
         let err = serde::de::Error::custom;
 
@@ -748,8 +748,8 @@ impl<'a> FromJson<'a> for Text<'a> {
     }
 }
 
-impl<'a> FromJson<'a> for Image<'a> {
-    fn from_json<E: serde::de::Error>(hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties<'a>) -> Result<Self, E>
+impl<'a> FromJson<'a> for Image {
+    fn from_json<E: serde::de::Error>(hashmap: &'a HashMap<String, JSONValue>, base: BaseProperties) -> Result<Self, E>
     where Self: Sized {
 
         let merr = |renderable: &'static str, property: Option<&'static str>, desc: &'static str| move |e: PropertyError|{

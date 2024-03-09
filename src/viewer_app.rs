@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Instant;
 
 use opengl_graphics::{ GlGraphics, OpenGL };
@@ -72,11 +73,11 @@ impl AppData {
                 let base_font = crate::render::font::Font::from_bytes(bytes.to_vec(), 0, "Default (bundled)".to_owned()).expect("couldn't parse default font's data");
                 let bold_font = crate::render::font::Font::from_bytes(bytes.to_vec(), 0, "Default (bundled)".to_owned()).expect("couldn't parse default font's data");
 
-                map.insert("Default".to_owned(), RefCell::new(presentation::TextFont { base_font, bold_font }));
+                map.insert("Default".to_owned(), Rc::new(RefCell::new(presentation::TextFont { base_font, bold_font })));
             }
 
             for (name, path) in document_fonts {
-                map.insert(name, RefCell::new(presentation::renderable::TextFont::new(path.0, path.1)));
+                map.insert(name, Rc::new(RefCell::new(presentation::renderable::TextFont::new(path.0, path.1))));
             }
 
             AssumeThreadSafe(map)

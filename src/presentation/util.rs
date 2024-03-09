@@ -4,6 +4,7 @@
 use log::{ debug as log_dbg, info as log_info, warn as log_warn, error as log_err };
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// All errors that can happen while constructing, converting or using mainly [`ExprVector`]s and [`Alignment`]s.
 /// 
@@ -166,10 +167,10 @@ use std::ops::Deref;
 use once_cell::sync::Lazy;
 
 /// The default context used for evaluating mathematical expressions.
-pub struct DefaultContext(Lazy<Context<'static>>);
+pub struct DefaultContext;
 impl DefaultContext {
-    pub const fn new() -> Self {
-        DefaultContext(Lazy::new(|| {
+    pub const fn new() -> Lazy<Arc<Context<'static>>> {
+        Lazy::new(|| {
             use std::f64::consts::{ FRAC_PI_2, PI };
             let mut ctx = Context::new();
             /*
@@ -231,29 +232,21 @@ impl DefaultContext {
             ctx.func2("isLess",|a,b|match a<b { true=>1.0, false=>0.0 });
             ctx.func2("mod", |a,b|a%b);
 
-            ctx
-        }))
+            Arc::new(ctx)
+        })
     }
 }
-impl Deref for DefaultContext {
-    type Target = Lazy<Context<'static>>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-unsafe impl Send for DefaultContext {}
-unsafe impl Sync for DefaultContext {}
 
 /// The default context used for evaluating mathematical expressions.
-pub static DEFAULT_CONTEXT: DefaultContext = DefaultContext::new();
+pub static DEFAULT_CONTEXT: crate::util::AssumeThreadSafe<Lazy<Arc<Context<'static>>>> = crate::util::AssumeThreadSafe(DefaultContext::new());
 
 /// A mathematical expression that depends on the applications resolution.
 /// 
 /// Allows the usage of a percent-sign inside of expressions.
-pub enum ResolutionDependentExpr<'a> {
+pub enum ResolutionDependentExpr {
     MathExpr {
         /// The function for evaluating the expression's value.
-        expr: Box<dyn Fn(f64, f64, f64) -> f64 + 'a>,
+        expr: Arc<dyn Fn(f64, f64, f64) -> f64>,
         /// The string the expression was parsed from.
         /// 
         /// Used for debugging.
@@ -261,7 +254,7 @@ pub enum ResolutionDependentExpr<'a> {
         /// The context that was used to construct the evaluation function.
         /// 
         /// Used to recreate the function when cloning.
-        base_context: &'a Context<'a>,
+        base_context: Arc<Context<'static>>,
         /// The type of the expression.
         /// 
         /// Decides what the percent sign (`%`) gets replaced with.
@@ -273,7 +266,7 @@ pub enum ResolutionDependentExpr<'a> {
     LuaExpr(mlua::Function<'static>, String)
 }
 
-impl<'a> Clone for ResolutionDependentExpr<'a> {
+impl Clone for ResolutionDependentExpr {
     fn clone(&self) -> Self {
         match self {
             Self::MathExpr { expr: _, base_string, base_context, base_expr_type } => {
@@ -287,7 +280,7 @@ impl<'a> Clone for ResolutionDependentExpr<'a> {
     }
 }
 
-impl<'a> mlua::UserData for ResolutionDependentExpr<'a> {
+impl mlua::UserData for ResolutionDependentExpr {
     fn add_methods<'lua, M: mlua::prelude::LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("evaluate", |lua, s, args: (f64, f64, f64, HashMap<String, mlua::Value>)| {
             s.evaluate(args.0, args.1, args.2, &args.3).map_err(|e| mlua::Error::runtime(e.to_string()))
@@ -295,7 +288,7 @@ impl<'a> mlua::UserData for ResolutionDependentExpr<'a> {
     }
 }
 
-impl<'a> mlua::UserData for &'a ResolutionDependentExpr<'a> {
+impl<'a> mlua::UserData for &'a ResolutionDependentExpr {
     fn add_methods<'lua, M: mlua::prelude::LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("evaluate", |lua, s, args: (f64, f64, f64, HashMap<String, mlua::Value>)| {
             s.evaluate(args.0, args.1, args.2, &args.3).map_err(|e| mlua::Error::runtime(e.to_string()))
@@ -304,7 +297,7 @@ impl<'a> mlua::UserData for &'a ResolutionDependentExpr<'a> {
 }
 
 use std::fmt::Debug;
-impl<'a> Debug for ResolutionDependentExpr<'a> {
+impl Debug for ResolutionDependentExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MathExpr { expr: _, base_string, base_context: _, base_expr_type: _ } => {
@@ -317,7 +310,7 @@ impl<'a> Debug for ResolutionDependentExpr<'a> {
     }
 }
 
-impl<'a> ResolutionDependentExpr<'a> {
+impl ResolutionDependentExpr {
     pub fn evaluate(&self, width: f64, height: f64, time: f64, object: &HashMap<String, mlua::Value>) -> anyhow::Result<ExprEval> {
         match self {
             Self::MathExpr { expr, base_string: _, base_context: _, base_expr_type: _ } => {
@@ -357,11 +350,11 @@ impl<'lua> mlua::IntoLua<'lua> for ExprEval {
 
 /// A list/tuple of expressions.
 #[derive(Clone)]
-pub struct ExprVector<'a, const N: usize> {
-    pub(crate) list: [ResolutionDependentExpr<'a>; N]
+pub struct ExprVector<const N: usize> {
+    pub(crate) list: [ResolutionDependentExpr; N]
 }
 
-impl<'a, const N: usize> mlua::UserData for ExprVector<'a, N> {
+impl<const N: usize> mlua::UserData for ExprVector<N> {
     fn add_methods<'lua, M: mlua::prelude::LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("evaluate", |lua, s, args: (f64, f64, f64, HashMap<String, mlua::Value>)| {
             s.evaluate_arr(args.0, args.1, args.2, &args.3)
@@ -371,7 +364,7 @@ impl<'a, const N: usize> mlua::UserData for ExprVector<'a, N> {
     }
 }
 
-impl<'a, const N: usize> mlua::UserData for &'a ExprVector<'a, N> {
+impl<'a, const N: usize> mlua::UserData for &'a ExprVector<N> {
     fn add_methods<'lua, M: mlua::prelude::LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("evaluate", |lua, s, args: (f64, f64, f64, HashMap<String, mlua::Value>)| {
             s.evaluate_arr(args.0, args.1, args.2, &args.3)
@@ -381,7 +374,7 @@ impl<'a, const N: usize> mlua::UserData for &'a ExprVector<'a, N> {
     }
 }
 
-impl<'a, const N: usize> Debug for ExprVector<'a, N> {
+impl<const N: usize> Debug for ExprVector<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ExprVector<{}>(", N)?;
         for (i, expr) in self.list.iter().enumerate() {
@@ -394,16 +387,16 @@ impl<'a, const N: usize> Debug for ExprVector<'a, N> {
     }
 }
 
-impl<'a, const N: usize> From<[ResolutionDependentExpr<'a>; N]> for ExprVector<'a, N> {
-    fn from(value: [ResolutionDependentExpr<'a>; N]) -> Self {
+impl<const N: usize> From<[ResolutionDependentExpr; N]> for ExprVector<N> {
+    fn from(value: [ResolutionDependentExpr; N]) -> Self {
         ExprVector { list: value }
     }
 }
 
-impl<'a, const N: usize> TryFrom<Vec<ResolutionDependentExpr<'a>>> for ExprVector<'a, N> {
+impl<const N: usize> TryFrom<Vec<ResolutionDependentExpr>> for ExprVector<N> {
     type Error = PropertyError;
 
-    fn try_from(value: Vec<ResolutionDependentExpr<'a>>) -> Result<Self, Self::Error> {
+    fn try_from(value: Vec<ResolutionDependentExpr>) -> Result<Self, Self::Error> {
         // let list = value.try_into().map_err(|v| format!("amount of given Expressions doesn't match the required amount of {} ({:?})", N, v))?;
 
         let value_len = value.len();
@@ -417,7 +410,7 @@ impl<'a, const N: usize> TryFrom<Vec<ResolutionDependentExpr<'a>>> for ExprVecto
     }
 }
 
-impl<'a, const N: usize> ExprVector<'a, N> {
+impl<const N: usize> ExprVector<N> {
     /// Evaluates all expressions into an array of size `N`
     pub fn evaluate_arr(&self, width: f64, height: f64, time: f64, object: &HashMap<String, mlua::Value>) -> anyhow::Result<[ExprEval; N]> {
         let mut errors = Vec::new();
@@ -434,13 +427,13 @@ impl<'a, const N: usize> ExprVector<'a, N> {
         }
     }
 }
-impl<'a> ExprVector<'a, 2> {
+impl ExprVector<2> {
     /// Evaluates all expressions into a tuple of 2 elements.
     pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64, object: &HashMap<String, mlua::Value>) -> (anyhow::Result<ExprEval>, anyhow::Result<ExprEval>) {
         (self.list[0].evaluate(width, height, time, object),self.list[1].evaluate(width, height, time, object))
     }
 }
-impl<'a> ExprVector<'a, 3> {
+impl ExprVector<3> {
     /// Evaluates all expressions into a tuple of 3 elements.
     pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64, object: &HashMap<String, mlua::Value>) -> (anyhow::Result<ExprEval>, anyhow::Result<ExprEval>, anyhow::Result<ExprEval>) {
         (
@@ -450,7 +443,7 @@ impl<'a> ExprVector<'a, 3> {
         )
     }
 }
-impl<'a> ExprVector<'a, 4> {
+impl ExprVector<4> {
     /// Evaluates all expressions into a tuple of 4 elements.
     pub fn evaluate_tuple(&self, width: f64, height: f64, time: f64, object: &HashMap<String, mlua::Value>) -> (anyhow::Result<ExprEval>, anyhow::Result<ExprEval>, anyhow::Result<ExprEval>, anyhow::Result<ExprEval>) {
         (
@@ -489,7 +482,7 @@ impl ResExprType {
 /// on the specified [`ResExprType`]).
 /// 
 /// Example: `50%` = `50/100*w` = `0.5*w` = half of the window's width
-pub fn res_dependent_expr<'a, S: Into<String>>(expr: S, context: &'a Context, expr_type: ResExprType) -> Result<ResolutionDependentExpr<'a>, PropertyError> {
+pub fn res_dependent_expr<S: Into<String>>(expr: S, context: Arc<Context<'static>>, expr_type: ResExprType) -> Result<ResolutionDependentExpr, PropertyError> {
     const EMPTY: String = String::new();
 
     let exprstr: String = expr.into();
@@ -523,8 +516,8 @@ pub fn res_dependent_expr<'a, S: Into<String>>(expr: S, context: &'a Context, ex
         PropertyError::SyntaxError(EMPTY.clone(), EMPTY.clone(), Some(errdesc))
     })?;
     let mut math_error = None;
-    match parsed_expr.bind3_with_context(context, "w", "h", "t") {
-        Ok(e) => { return Ok(ResolutionDependentExpr::MathExpr { expr: Box::new(e), base_string: mstring, base_context: context, base_expr_type: expr_type }) },
+    match parsed_expr.bind3_with_context(context.clone(), "w", "h", "t") {
+        Ok(e) => { return Ok(ResolutionDependentExpr::MathExpr { expr: Arc::new(e), base_string: mstring, base_context: context, base_expr_type: expr_type }) },
         Err(err) => {
             let errdesc = match err {
                 Error::Function(name, errtype) => match errtype {
@@ -545,7 +538,8 @@ pub fn res_dependent_expr<'a, S: Into<String>>(expr: S, context: &'a Context, ex
                     RPNError::TooManyOperands => format!("Too many operands!"),
                     RPNError::UnexpectedComma(pos) => format!("Unexpected comma at position {pos}: \"...{}...\"", &mstring[(pos-2).max(0)..(pos+2).min(mstring.len()-1)]),
                 },
-                Error::UnknownVariable(name) => format!("Unknown variable '{name}'!")
+                Error::UnknownVariable(name) => format!("Unknown variable '{name}'!"),
+                Error::EvalError(err) => format!("Evaluation error: {err}"),
             };
             math_error = Some(PropertyError::SyntaxError(EMPTY.clone(), EMPTY.clone(), Some(errdesc)));
         }
@@ -568,7 +562,7 @@ pub fn res_dependent_expr<'a, S: Into<String>>(expr: S, context: &'a Context, ex
     Err(PropertyError::MultiError(vec![math_error.unwrap(), lua_error.unwrap()]))
 }
 
-pub fn lua_expr<S: Into<String>>(expr: S) -> Result<ResolutionDependentExpr<'static>, PropertyError> {
+pub fn lua_expr<S: Into<String>>(expr: S) -> Result<ResolutionDependentExpr, PropertyError> {
     let str = expr.into();
     crate::LUA_INSTANCE.get().unwrap().load(&str).into_function()
         .map(|f| ResolutionDependentExpr::LuaExpr(f, str))
@@ -576,11 +570,11 @@ pub fn lua_expr<S: Into<String>>(expr: S) -> Result<ResolutionDependentExpr<'sta
 }
 
 /// Parses a list of expressions separated by semicolons using the [`res_dependent_expr()`] function.
-pub fn parse_expression_list<'a, S: Into<String>>(string: S, context: &'a Context) -> Result<Vec<ResolutionDependentExpr<'a>>, PropertyError> {
+pub fn parse_expression_list<'a, S: Into<String>>(string: S, context: Arc<Context<'static>>) -> Result<Vec<ResolutionDependentExpr>, PropertyError> {
     let mut expr_vec = Vec::new();
 
     for (i,expression) in <S as Into<String>>::into(string).split(";").enumerate() {
-        expr_vec.push(res_dependent_expr(expression.to_owned(), context, match i%2 { 0 => ResExprType::WidthBased, _ => ResExprType::HeightBased })?);
+        expr_vec.push(res_dependent_expr(expression.to_owned(), context.clone(), match i%2 { 0 => ResExprType::WidthBased, _ => ResExprType::HeightBased })?);
     }
 
     Ok(expr_vec)

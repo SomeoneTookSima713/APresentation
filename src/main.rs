@@ -10,8 +10,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
-use std::fmt::Debug;
 use std::sync::{ OnceLock, RwLock };
+use std::rc::Rc;
 use opengl_graphics::OpenGL;
 use piston::input::*;
 use piston_window::{ PistonWindow, Events, EventSettings };
@@ -34,7 +34,7 @@ const APPLICATION_VERSION: &'static str = include_str!("version");
 // These statics may only be used on one and only one thread. If any one of
 // them is used on multiple threads concurrently, things will go VERY bad.
 pub static LUA_INSTANCE: OnceLock<AssumeThreadSafe<Lua>> = OnceLock::new();
-pub static FONTS: OnceLock<AssumeThreadSafe<HashMap<String, RefCell<presentation::TextFont>>>> = OnceLock::new();
+pub static FONTS: OnceLock<AssumeThreadSafe<HashMap<String, Rc<RefCell<presentation::TextFont>>>>> = OnceLock::new();
 
 fn run_viewer(args: Vec<String>) -> anyhow::Result<()> {
     let mut application = viewer_app::Application::create(OpenGL::V3_2);

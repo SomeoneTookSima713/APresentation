@@ -39,7 +39,7 @@ image = "0.24"
 
 egui = "0.23"
 
-meval = "0.2"
+meval = { git = "https://github.com/SomeoneTookSima713/meval-rs.git" }
 chrono = "0.4"
 regex = "1"
 mlua = { version = "0.9", features = ["luajit", "vendored"] }

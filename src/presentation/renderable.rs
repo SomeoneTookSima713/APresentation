@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::rc::Rc;
 
 use opengl_graphics::GlGraphics;
 use graphics::{ Context, Transformed };
@@ -15,7 +16,7 @@ use super::util; use util::{ ExprVector, Alignment, PropertyError };
 pub trait Renderable: Debug {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) -> anyhow::Result<()>;
 
-    fn get_base_properties(&self) -> &BaseProperties<'_>;
+    fn get_base_properties(&self) -> &BaseProperties;
 
     /// Basically a copy of the [`Clone::clone`] function because this trait wouldn't be object
     /// safe anymore if I'd require the [`Clone`] trait to be implemented
@@ -52,7 +53,7 @@ impl<'a> Renderable for RenderableRef<'a> {
         self.reference.render(time, context, opengl)
     }
 
-    fn get_base_properties(&self) -> &BaseProperties<'_> {
+    fn get_base_properties(&self) -> &BaseProperties {
         self.reference.get_base_properties()
     }
 
@@ -76,14 +77,14 @@ impl<'a> Debug for RenderableRef<'a> {
 
 /// Contains all basic properties that every Renderable object should have.
 #[derive(Debug, Clone)]
-pub struct BaseProperties<'a> {
-    pub pos: ExprVector<'a, 2>,
-    pub size: ExprVector<'a, 2>,
-    pub color: ExprVector<'a, 4>,
+pub struct BaseProperties {
+    pub pos: ExprVector<2>,
+    pub size: ExprVector<2>,
+    pub color: ExprVector<4>,
     pub alignment: Alignment
 }
 
-impl<'a> BaseProperties<'a> {
+impl BaseProperties {
     /// Constructs new base properties of a Renderable object from four [`String`]s defining position, size, color and alignment.
     pub fn new<PStr, SStr, CStr, AStr>(pos: PStr, size: SStr, color: CStr, alignment: AStr) -> Result<Self, PropertyError>
     where
@@ -100,9 +101,9 @@ impl<'a> BaseProperties<'a> {
         };
 
         Ok(BaseProperties {
-            pos: util::parse_expression_list(pos, &util::DEFAULT_CONTEXT).map_err((err)("pos"))?.try_into().map_err((err)("pos"))?,
-            size: util::parse_expression_list(size, &util::DEFAULT_CONTEXT).map_err((err)("size"))?.try_into().map_err((err)("size"))?,
-            color: util::parse_expression_list(color, &util::DEFAULT_CONTEXT).map_err((err)("color"))?.try_into().map_err((err)("color"))?,
+            pos: util::parse_expression_list(pos, util::DEFAULT_CONTEXT.clone()).map_err((err)("pos"))?.try_into().map_err((err)("pos"))?,
+            size: util::parse_expression_list(size, util::DEFAULT_CONTEXT.clone()).map_err((err)("size"))?.try_into().map_err((err)("size"))?,
+            color: util::parse_expression_list(color, util::DEFAULT_CONTEXT.clone()).map_err((err)("color"))?.try_into().map_err((err)("color"))?,
             alignment: Alignment::try_from(alignment.into())?,
         })
     }
@@ -110,8 +111,10 @@ impl<'a> BaseProperties<'a> {
     pub fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> anyhow::Result<HashMap<String, mlua::Value<'lua>>> {
         use mlua::IntoLua;
 
+        let pos = self.pos.clone();
+
         let mut hm = HashMap::new();
-        hm.insert("pos".to_owned(), (&self.pos).clone().into_lua(lua).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?);
+        hm.insert("pos".to_owned(), pos.into_lua(lua).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?);
         hm.insert("size".to_owned(), (&self.size).clone().into_lua(lua).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?);
         hm.insert("color".to_owned(), (&self.color).clone().into_lua(lua).map_err(|e|anyhow::anyhow!("{}",e.to_string()))?);
         hm.insert("alignment".to_owned(), mlua::Value::String(lua.create_string(self.alignment.to_string())?));
@@ -120,10 +123,10 @@ impl<'a> BaseProperties<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ColoredRect<'a> {
-    base: BaseProperties<'a>
+pub struct ColoredRect {
+    base: BaseProperties
 }
-impl<'a> Renderable for ColoredRect<'a> {
+impl Renderable for ColoredRect {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) -> anyhow::Result<()> {
         let object_repr = self.to_lua(crate::LUA_INSTANCE.get().unwrap())?;
 
@@ -152,15 +155,15 @@ impl<'a> Renderable for ColoredRect<'a> {
         Ok(())
     }
 
-    fn get_base_properties(&self) -> &BaseProperties<'_> {
+    fn get_base_properties(&self) -> &BaseProperties {
         &self.base
     }
 
     fn copy<'b>(&self) -> Box<dyn Renderable + 'b>
     where Self: Sized {
-        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable + 'a) as *mut (dyn Renderable + 'a);
+        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable) as *mut (dyn Renderable);
         unsafe {
-            let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
+            let result_ptr = std::mem::transmute::<*mut (dyn Renderable), *mut (dyn Renderable + 'b)>(leaked);
             Box::from_raw(result_ptr)
         }
     }
@@ -169,19 +172,19 @@ impl<'a> Renderable for ColoredRect<'a> {
         self.base.to_lua(lua)
     }
 }
-impl<'a> ColoredRect<'a> {
-    pub fn new(base: BaseProperties<'a>) -> Self {
+impl ColoredRect {
+    pub fn new(base: BaseProperties) -> Self {
         ColoredRect { base }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct RoundedRect<'a> {
-    base: BaseProperties<'a>,
-    corner_rounding: util::ResolutionDependentExpr<'a>,
+pub struct RoundedRect {
+    base: BaseProperties,
+    corner_rounding: util::ResolutionDependentExpr,
 }
 
-impl<'a> Renderable for RoundedRect<'a> {
+impl Renderable for RoundedRect {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) -> anyhow::Result<()> {
         use graphics::Graphics;
         let object_repr = self.to_lua(crate::LUA_INSTANCE.get().unwrap())?;
@@ -212,14 +215,14 @@ impl<'a> Renderable for RoundedRect<'a> {
         Ok(())
     }
 
-    fn get_base_properties<'b>(&'b self) -> &'b BaseProperties<'b> {
+    fn get_base_properties<'b>(&'b self) -> &'b BaseProperties {
         &self.base
     }
 
     fn copy<'b>(&self) -> Box<dyn Renderable + 'b> {
-        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable + 'a) as *mut (dyn Renderable + 'a);
+        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable) as *mut (dyn Renderable);
         unsafe {
-            let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
+            let result_ptr = std::mem::transmute::<*mut (dyn Renderable), *mut (dyn Renderable + 'b)>(leaked);
             Box::from_raw(result_ptr)
         }
     }
@@ -227,16 +230,16 @@ impl<'a> Renderable for RoundedRect<'a> {
     fn to_lua<'lua>(&self, lua: &'lua mlua::Lua) -> anyhow::Result<HashMap<String, mlua::Value<'lua>>> {
         use mlua::IntoLua;
         let mut ret = self.base.to_lua(lua)?;
-        ret.insert("corner_rounding".to_owned(), self.corner_rounding.into_lua(lua)?);
+        ret.insert("corner_rounding".to_owned(), self.corner_rounding.clone().into_lua(lua)?);
         Ok(ret)
     }
 }
-impl<'a> RoundedRect<'a> {
-    pub fn new<RoundingStr>(base: BaseProperties<'a>, corner_rounding: RoundingStr) -> Result<Self, PropertyError>
+impl RoundedRect {
+    pub fn new<RoundingStr>(base: BaseProperties, corner_rounding: RoundingStr) -> Result<Self, PropertyError>
     where RoundingStr: Into<String> {
         Ok(RoundedRect {
             base,
-            corner_rounding: util::res_dependent_expr(corner_rounding, &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased)?,
+            corner_rounding: util::res_dependent_expr(corner_rounding, util::DEFAULT_CONTEXT.clone(), util::ResExprType::HeightBased)?,
         })
     }
 }
@@ -269,35 +272,35 @@ impl TextFont {
 use std::cell::RefCell;
 
 #[derive(Clone)]
-pub enum TextPart<'a, 'font> {
+pub enum TextPart {
     Text {
         text: String,
         bold: bool,
         italic: bool,
-        color: util::ExprVector<'a, 4>,
-        size: util::ResolutionDependentExpr<'a>,
-        font: &'font RefCell<TextFont>
+        color: util::ExprVector<4>,
+        size: util::ResolutionDependentExpr,
+        font: Rc<RefCell<TextFont>>
     },
     Tab,
     Space {
-        size: util::ResolutionDependentExpr<'a>,
-        font: &'font RefCell<TextFont>
+        size: util::ResolutionDependentExpr,
+        font: Rc<RefCell<TextFont>>
     },
     NewLine,
     Placeholder {
         index: String,
-        pad_char: &'a str,
+        pad_char: char,
         pad_amount: i8,
 
         bold: bool,
         italic: bool,
-        color: util::ExprVector<'a, 4>,
-        size: util::ResolutionDependentExpr<'a>,
-        font: &'font RefCell<TextFont>
+        color: util::ExprVector<4>,
+        size: util::ResolutionDependentExpr,
+        font: Rc<RefCell<TextFont>>
     },
 }
 
-impl<'a, 'font> std::fmt::Debug for TextPart<'a, 'font> {
+impl std::fmt::Debug for TextPart {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TextPart::Text { text, bold, italic, color, size, font } => { write!(f, "\"{}\"", text) },
@@ -315,7 +318,7 @@ impl<'a, 'font> std::fmt::Debug for TextPart<'a, 'font> {
     }
 }
 
-impl<'a, 'font> TextPart<'a, 'font> {
+impl TextPart {
 
     pub fn set_bold(&mut self, set: bool) -> Result<(), PropertyError> {
         match self {
@@ -333,19 +336,19 @@ impl<'a, 'font> TextPart<'a, 'font> {
     }
     pub fn set_color(&mut self, set: String) -> Result<(), PropertyError> {
         match self {
-            TextPart::Text { text, bold, italic, color, size, font } => *color = util::parse_expression_list(set, &util::DEFAULT_CONTEXT)?.try_into()?,
+            TextPart::Text { text, bold, italic, color, size, font } => *color = util::parse_expression_list(set, util::DEFAULT_CONTEXT.clone())?.try_into()?,
             _ => {}
         }
         Ok(())
     }
     pub fn set_size(&mut self, set: String) -> Result<(), PropertyError> {
         match self {
-            TextPart::Text { text, bold, italic, color, size, font } => *size = util::res_dependent_expr(set, &util::DEFAULT_CONTEXT, util::ResExprType::HeightBased)?,
+            TextPart::Text { text, bold, italic, color, size, font } => *size = util::res_dependent_expr(set, util::DEFAULT_CONTEXT.clone(), util::ResExprType::HeightBased)?,
             _ => {}
         }
         Ok(())
     }
-    pub fn set_font(&mut self, set: &'font RefCell<TextFont>) -> Result<(), PropertyError> {
+    pub fn set_font(&mut self, set: Rc<RefCell<TextFont>>) -> Result<(), PropertyError> {
         match self {
             TextPart::Text { text, bold, italic, color, size, font } => *font = set,
             _ => {}
@@ -354,7 +357,7 @@ impl<'a, 'font> TextPart<'a, 'font> {
     }
 }
 
-impl<'a, 'font> mlua::UserData for TextPart<'a, 'font> {
+impl mlua::UserData for TextPart {
     fn add_fields<'lua, F: mlua::prelude::LuaUserDataFields<'lua, Self>>(fields: &mut F) {
         use mlua::IntoLua;
 
@@ -370,7 +373,7 @@ impl<'a, 'font> mlua::UserData for TextPart<'a, 'font> {
         fields.add_field_method_get("data", |lua, s| {
             let mut table = lua.create_table()?;
 
-            match *s {
+            match s {
                 TextPart::Placeholder {
                     index,
                     pad_char,
@@ -382,12 +385,12 @@ impl<'a, 'font> mlua::UserData for TextPart<'a, 'font> {
                     font
                 } => {
                     table.set("index", index.as_str());
-                    table.set("pad_char", pad_char);
-                    table.set("pad_amount", pad_amount);
-                    table.set("bold", bold);
-                    table.set("italic", italic);
-                    table.set("color", color);
-                    table.set("size", size);
+                    table.set("pad_char", String::from_utf8_lossy(&[*pad_char as u8]));
+                    table.set("pad_amount", *pad_amount);
+                    table.set("bold", *bold);
+                    table.set("italic", *italic);
+                    table.set("color", color.clone());
+                    table.set("size", size.clone());
                     table.set("font_name", font.borrow().base_font.name.as_str());
                     table.set("bold_font_name", font.borrow().bold_font.name.as_str());
                 },
@@ -395,7 +398,7 @@ impl<'a, 'font> mlua::UserData for TextPart<'a, 'font> {
                     size,
                     font
                 } => {
-                    table.set("size", size);
+                    table.set("size", size.clone());
                     table.set("font_name", font.borrow().base_font.name.as_str());
                     table.set("bold_font_name", font.borrow().bold_font.name.as_str());
                 },
@@ -408,10 +411,10 @@ impl<'a, 'font> mlua::UserData for TextPart<'a, 'font> {
                     font
                 } => {
                     table.set("text", text.as_str());
-                    table.set("bold", bold);
-                    table.set("italic", italic);
-                    table.set("color", color);
-                    table.set("size", size);
+                    table.set("bold", *bold);
+                    table.set("italic", *italic);
+                    table.set("color", color.clone());
+                    table.set("size", size.clone());
                     table.set("font_name", font.borrow().base_font.name.as_str());
                     table.set("bold_font_name", font.borrow().bold_font.name.as_str());
                 },
@@ -425,8 +428,8 @@ impl<'a, 'font> mlua::UserData for TextPart<'a, 'font> {
 
 #[derive(Debug, Clone)]
 pub struct Text<'a> {
-    base: BaseProperties<'a>,
-    text: Vec<TextPart<'a, 'a>>,
+    base: BaseProperties,
+    text: Vec<TextPart>,
     text_alignment: util::Alignment,
     placeholders: HashMap<String, TextPlaceholderExpr<'a>>
 }
@@ -512,7 +515,7 @@ const PLACEHOLDER_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"\{((?<padchar>[^
 impl<'a> Text<'a> {
     pub const PLACEHOLDER_AMOUNT: usize = 64;
 
-    fn parse<'b, S: AsRef<str>>(string: String, base_size: util::ResolutionDependentExpr<'b>, base_font: S, bold: bool, italic: bool, color: util::ExprVector<'b, 4>, font_list: &'static HashMap<String, RefCell<TextFont>>) -> Result<Vec<TextPart<'b, 'b>>, PropertyError> {
+    fn parse<S: AsRef<str>>(string: String, base_size: util::ResolutionDependentExpr, base_font: S, bold: bool, italic: bool, color: util::ExprVector<4>, font_list: &'static HashMap<String, Rc<RefCell<TextFont>>>) -> Result<Vec<TextPart>, PropertyError> {
         use regex::Captures;
         use std::sync::OnceLock;
         lazy_static::lazy_static! {
@@ -538,7 +541,7 @@ impl<'a> Text<'a> {
             "text".to_owned(),
             Some(str.to_owned())) };
 
-        let regex_fns: [Box<dyn Fn(&mut TextPart, &Captures, &'static HashMap<String, RefCell<TextFont>>) -> Result<(), PropertyError>>; 5] = [
+        let regex_fns: [Box<dyn Fn(&mut TextPart, &Captures, &'static HashMap<String, Rc<RefCell<TextFont>>>) -> Result<(), PropertyError>>; 5] = [
             Box::new(|part, captures, fonts| {
                 let size = captures.name("size")
                     .ok_or((regex_error_fn)("No size expression in size redefinition!"))?
@@ -551,7 +554,7 @@ impl<'a> Text<'a> {
 
                 let alpha = match part {
                     TextPart::Text { text: _, bold: _, italic: _, color, size: _, font: _ } => {
-                        match color.list[3] {
+                        match &color.list[3] {
                             util::ResolutionDependentExpr::MathExpr { expr, base_string, base_context, base_expr_type } => base_string.clone(),
                             util::ResolutionDependentExpr::LuaExpr(f, s) => s.clone()
                         }
@@ -572,13 +575,13 @@ impl<'a> Text<'a> {
                         .ok_or((regex_error_fn)("No font name in font redefinition!"))?
                         .as_str()
                     ).ok_or((regex_error_fn)("Invalid font name in font redefinition!"))?;
-                part.set_font(f)
+                part.set_font(f.clone())
             }),
             Box::new(|part, captures, fonts| part.set_bold(true)),
             Box::new(|part, captures, fonts| part.set_italic(true)),
         ];
 
-        let mut vec = vec![ TextPart::Text { text: string.as_str().into(), bold, italic, color, size: base_size, font: font_list.get(base_font.as_ref()).unwrap() } ];
+        let mut vec = vec![ TextPart::Text { text: string.as_str().into(), bold, italic, color, size: base_size, font: font_list.get(base_font.as_ref()).unwrap().clone() } ];
 
         let mut construct_vec = Vec::new();
 
@@ -590,8 +593,8 @@ impl<'a> Text<'a> {
                         for text_captures in regex.captures_iter(text) {
                             let text_match = text_captures.get(0).unwrap();
                             let text_content = text_captures.name("content").expect("No content matched! This shouldn't happen!");
-                            construct_vec.push(TextPart::Text { text: text[last_match_end..text_match.start()].into(), bold, italic, color: color.clone(), size: size.clone(), font });
-                            let mut modified = TextPart::Text { text: text[text_content.start()..text_content.end()].into(), bold, italic, color: color.clone(), size: size.clone(), font };
+                            construct_vec.push(TextPart::Text { text: text[last_match_end..text_match.start()].into(), bold, italic, color: color.clone(), size: size.clone(), font: font.clone() });
+                            let mut modified = TextPart::Text { text: text[text_content.start()..text_content.end()].into(), bold, italic, color: color.clone(), size: size.clone(), font: font.clone() };
                             (regex_fns[i])(&mut modified, &text_captures, font_list)?;
                             construct_vec.push(modified);
                             last_match_end = text_match.end();
@@ -624,17 +627,17 @@ impl<'a> Text<'a> {
                             
                             let (before, after) = (&leftover_text[..placeholder_match.start()], &leftover_text[placeholder_match.end()..]);
     
-                            construct_vec.push(TextPart::Text { text: before.to_owned(), bold, italic, color: color.clone(), size: size.clone(), font });
+                            construct_vec.push(TextPart::Text { text: before.to_owned(), bold, italic, color: color.clone(), size: size.clone(), font: font.clone() });
     
                             construct_vec.push(TextPart::Placeholder {
                                 index: index.to_owned(),
-                                pad_char: padchar,
+                                pad_char: padchar.chars().next().unwrap_or(' '),
                                 pad_amount: padamount as i8,
                                 bold,
                                 italic,
                                 color: color.clone(),
                                 size: size.clone(),
-                                font
+                                font: font.clone()
                             });
 
                             leftover_text = after.to_owned();
@@ -643,7 +646,7 @@ impl<'a> Text<'a> {
                         }
                     }
                     if leftover_text.len()>0 {
-                        construct_vec.push(TextPart::Text { text: leftover_text, bold, italic, color: color.clone(), size: size.clone(), font });
+                        construct_vec.push(TextPart::Text { text: leftover_text, bold, italic, color: color.clone(), size: size.clone(), font: font.clone() });
                     }
                 },
                 _ => construct_vec.push(text_part)
@@ -670,7 +673,7 @@ impl<'a> Text<'a> {
                         if &txt == "\t" {
                             construct_vec.push(TextPart::Tab);
                         } else {
-                            construct_vec.push(TextPart::Text { text: txt, bold, italic, color: color.clone(), size: size.clone(), font });
+                            construct_vec.push(TextPart::Text { text: txt, bold, italic, color: color.clone(), size: size.clone(), font: font.clone() });
                         }
                     }
                 },
@@ -688,9 +691,9 @@ impl<'a> Text<'a> {
                         let split = text.split(c).collect::<Vec<&str>>();
 
                         for (i, &txt) in split.iter().enumerate() {
-                            construct_vec.push(TextPart::Text { text: txt.into(), bold, italic, color: color.clone(), size: size.clone(), font });
+                            construct_vec.push(TextPart::Text { text: txt.into(), bold, italic, color: color.clone(), size: size.clone(), font: font.clone() });
                             if i<split.len()-1 {
-                                construct_vec.push(TextPart::Space { size: size.clone(), font });
+                                construct_vec.push(TextPart::Space { size: size.clone(), font: font.clone() });
                             }
                         }
                     },
@@ -710,10 +713,10 @@ impl<'a> Text<'a> {
     }
 
     pub fn new<TextStr, TxtAlignStr>(
-        base: BaseProperties<'a>,
+        base: BaseProperties,
         text: Vec<TextStr>,
         base_font: String,
-        font_list: &'static HashMap<String, RefCell<TextFont>>,
+        font_list: &'static HashMap<String, Rc<RefCell<TextFont>>>,
         placeholders: HashMap<String, TextPlaceholderExpr<'a>>,
         text_alignment: TxtAlignStr
     ) -> Result<Text<'a>, PropertyError>
@@ -755,12 +758,12 @@ impl<'a> Text<'a> {
         })
     }
 
-    fn pad_num<'b>(num: f64, pad_amount: i8, pad_char: &str, pad_dir_str: &str) -> &'b str {
+    fn pad_num<'b>(num: f64, pad_amount: i8, pad_char: char, pad_dir_str: &str) -> &'b str {
         let numstr = num.to_string();
         let mut padstr = String::new();
         if pad_amount-numstr.len() as i8 > 0 {
             for _ in 0..pad_amount as usize-numstr.len() {
-                padstr.push_str(pad_char);
+                padstr.push(pad_char);
             }
         }
         match pad_dir_str {
@@ -772,7 +775,7 @@ impl<'a> Text<'a> {
 }
 
 impl<'a> Renderable for Text<'a> {
-    fn get_base_properties(&self) -> &BaseProperties<'_> {
+    fn get_base_properties(&self) -> &BaseProperties {
         &self.base
     }
 
@@ -974,7 +977,7 @@ impl<'a> Renderable for Text<'a> {
                                 ">"
                             };
 
-                            let text = Self::pad_num(val, pad_amount.abs(), pad_char, pad_dir_str);
+                            let text = Self::pad_num(val, pad_amount.abs(), *pad_char, pad_dir_str);
 
                             let mut font_borrow = font.borrow_mut();
                             let font_instance;
@@ -1013,7 +1016,7 @@ impl<'a> Renderable for Text<'a> {
         use mlua::IntoLua;
         let mut ret = self.base.to_lua(lua)?;
 
-        ret.insert("text".to_owned(), self.text.into_lua(lua)?);
+        ret.insert("text".to_owned(), self.text.iter().map(|r|r.clone()).collect::<Vec<_>>().into_lua(lua)?);
 
         Ok(ret)
     }
@@ -1027,20 +1030,20 @@ use std::sync::RwLock;
 static IMAGE_TEXTURES: RwLock<Vec<Texture>> = RwLock::new(Vec::new());
 
 #[derive(Clone)]
-pub struct Image<'a> {
-    base: BaseProperties<'a>,
+pub struct Image {
+    base: BaseProperties,
     texture_path: String,
     texture: usize
 }
 
-impl<'a> Debug for Image<'a> {
+impl Debug for Image {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Image{{ pos: {:?}, size: {:?}, alignment: {:?}, texture: {} }}",self.base.pos,self.base.size,self.base.alignment,self.texture_path)
     }
 }
 
-impl<'a> Image<'a> {
-    pub fn new<P: AsRef<Path>>(base: BaseProperties<'a>, path: P) -> Result<Self, PropertyError> {
+impl Image {
+    pub fn new<P: AsRef<Path>>(base: BaseProperties, path: P) -> Result<Self, PropertyError> {
         use crate::render::sprite::DEFAULT_TEXTURE_SETTINGS;
 
         let texture_path = path.as_ref().to_str()
@@ -1061,7 +1064,7 @@ impl<'a> Image<'a> {
     }
 }
 
-impl<'a> Renderable for Image<'a> {
+impl Renderable for Image {
     fn render(&self, time: f64, context: Context, opengl: &mut GlGraphics) -> anyhow::Result<()> {
         use graphics::DrawState;
 
@@ -1090,14 +1093,14 @@ impl<'a> Renderable for Image<'a> {
         Ok(())
     }
 
-    fn get_base_properties(&self) -> &BaseProperties<'_> {
+    fn get_base_properties(&self) -> &BaseProperties {
         &self.base
     }
 
     fn copy<'b>(&self) -> Box<dyn Renderable + 'b> {
-        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable + 'a) as *mut (dyn Renderable + 'a);
+        let leaked = Box::leak(Box::new(<Self as Clone>::clone(self))) as &mut (dyn Renderable) as *mut (dyn Renderable);
         unsafe {
-            let result_ptr = std::mem::transmute::<*mut (dyn Renderable + 'a), *mut (dyn Renderable + 'b)>(leaked);
+            let result_ptr = std::mem::transmute::<*mut (dyn Renderable), *mut (dyn Renderable + 'b)>(leaked);
             Box::from_raw(result_ptr)
         }
     }
@@ -1106,7 +1109,7 @@ impl<'a> Renderable for Image<'a> {
         use mlua::IntoLua;
         let mut ret = self.base.to_lua(lua)?;
 
-        ret.insert("texture".to_owned(), (&self.texture_path).into_lua(lua)?);
+        ret.insert("texture".to_owned(), (self.texture_path.as_str()).into_lua(lua)?);
 
         Ok(ret)
     }

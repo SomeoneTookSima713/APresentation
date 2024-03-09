@@ -25,6 +25,15 @@
                 */
                 {
                     type: "RoundedRect",
+                    pos: "return 5;50%-h+h*easeOutPow(t-1,3)",
+                    size: "100%-0.36*h;82%",
+                    alignment: "MID_CENTERED",
+                    color: "#edf2fb",
+                    corner_rounding: "2%",
+                    z: 1
+                },
+                {
+                    type: "RoundedRect",
                     pos: "50%;50%-h+h*easeOutPow(t-1,3)",
                     size: "100%-0.36*h;82%",
                     alignment: "MID_CENTERED",
