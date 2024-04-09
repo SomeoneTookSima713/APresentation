@@ -1,6 +1,7 @@
 pub mod consts {
     /// The initial window size.
-    pub const WINDOW_SIZE: (i32, i32) = (1280,720);
+    pub const WINDOW_SIZE: (u32, u32) = (1280,720);
+    pub const WINDOW_RESIZE_INCREMENTS: (u32, u32) = (1,1);
     /// The window's title.
     pub const WINDOW_TITLE: &str = "APresentation";
 
