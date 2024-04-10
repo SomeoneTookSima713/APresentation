@@ -1,3 +1,12 @@
+#![feature(maybe_uninit_array_assume_init)]
+#![feature(const_float_bits_conv)]
+#![feature(const_swap)]
+#![feature(const_mut_refs)]
+#![feature(const_trait_impl)]
+#![feature(const_maybe_uninit_array_assume_init)]
+#![feature(const_maybe_uninit_write)]
+#![feature(generic_const_exprs)]
+
 use winit::dpi::PhysicalSize;
 use winit::event::{ Event, WindowEvent, KeyEvent, ElementState };
 use winit::event_loop::EventLoop;
@@ -5,6 +14,8 @@ use winit::keyboard::{ Key, NamedKey };
 use winit::window::{ Window, WindowBuilder };
 
 mod util;
+mod buffers;
+mod texture;
 
 pub struct BaseState<'a> {
     surface: wgpu::Surface<'a>,
@@ -13,6 +24,12 @@ pub struct BaseState<'a> {
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     window: &'a Window,
+    // Temporary stuff
+    render_pipeline: wgpu::RenderPipeline,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    texture: texture::Texture,
+    last_time: std::time::Instant,
 }
 
 impl<'a> BaseState<'a> {
@@ -88,6 +105,66 @@ impl<'a> BaseState<'a> {
         };
         surface.configure(&device, &config);
 
+        texture::init(&device)?;
+
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+
+        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Temporary Render Pipeline Layout"),
+            bind_group_layouts: &[texture::TEXTURE_BIND_GROUP_LAYOUT.get().unwrap()],
+            push_constant_ranges: &[]
+        });
+
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Temporary Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[
+                    buffers::Vertex::DESC
+                ] },
+            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: "fs_main", targets: &[
+                Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+            ] }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                // This is a 2D-application, so we don't need any backface-
+                // culling, because there are no back or front faces in 2D.
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
+            multiview: None
+        });
+
+        use wgpu::util::DeviceExt;
+        let vertex_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(buffers::VERTICES),
+                usage: wgpu::BufferUsages::VERTEX,
+            }
+        );
+        let index_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Index Buffer"),
+                contents: bytemuck::cast_slice(buffers::INDICES),
+                usage: wgpu::BufferUsages::INDEX,
+            }
+        );
+
+        let texture = texture::Texture::from_image(&device, &queue, "test.jpeg", texture::TextureSamplerSelection::Linear, None)?;
+
         Ok(Self {
             surface,
             device,
@@ -95,6 +172,12 @@ impl<'a> BaseState<'a> {
             config,
             size: window.inner_size(),
             window,
+            // Stuff that will be removed later
+            render_pipeline,
+            vertex_buffer,
+            index_buffer,
+            texture,
+            last_time: std::time::Instant::now(),
         })
     }
 
@@ -119,7 +202,9 @@ impl<'a> BaseState<'a> {
     }
 
     fn update(&mut self) {
-        
+        let dt = self.last_time.elapsed().as_secs_f64();
+        self.last_time = std::time::Instant::now();
+        log::debug!("FPS: {}", (1000.0/dt).floor() / 1000.0);
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -132,7 +217,7 @@ impl<'a> BaseState<'a> {
         });
 
         {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
@@ -151,6 +236,12 @@ impl<'a> BaseState<'a> {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.texture.bind_group(), &[]);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..buffers::INDICES.len() as u32, 0, 0..1);
         }
     
         // submit will accept anything that implements IntoIter
@@ -201,6 +292,7 @@ pub async fn run() -> anyhow::Result<()> {
                                 log::error!("Error with GPU Surface: {e}")
                             }
                         }
+                        base_state.window().request_redraw();
                     },
                     _ => {}
                 }
@@ -219,7 +311,7 @@ fn init_window() -> anyhow::Result<(EventLoop<()>, Window)> {
         .with_resizable(true)
         .with_resize_increments(PhysicalSize::<u32>::from(util::consts::WINDOW_RESIZE_INCREMENTS))
         .with_title(util::consts::WINDOW_TITLE)
-        .with_window_icon(Some(winit::window::Icon::from_rgba(Vec::from(*util::consts::ICON_DATA), util::consts::ICON_WIDTH as u32, util::consts::ICON_HEIGHT as u32)?))
+        .with_window_icon(Some(winit::window::Icon::from_rgba(util::consts::ICON_DATA.as_raw().clone(), util::consts::ICON_DATA.width(), util::consts::ICON_DATA.height())?))
         .build(&event_loop)?;
     Ok((event_loop, window))
 }
