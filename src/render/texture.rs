@@ -78,6 +78,7 @@ pub fn init(device: &wgpu::Device) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Debug)]
 pub struct Texture {
     texture: wgpu::Texture,
     view: wgpu::TextureView,

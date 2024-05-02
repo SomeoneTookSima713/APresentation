@@ -6,6 +6,16 @@
 #![feature(const_maybe_uninit_array_assume_init)]
 #![feature(const_maybe_uninit_write)]
 #![feature(generic_const_exprs)]
+#![feature(exclusive_wrapper)]
+#![feature(let_chains)]
+#![feature(iterator_try_collect)]
+#![feature(min_specialization)]
+#![feature(const_refs_to_cell)]
+#![feature(generic_arg_infer)]
+#![feature(allocator_api)]
+#![feature(alloc_layout_extra)]
+#![feature(slice_ptr_get)]
+#![feature(box_into_inner)]
 
 use winit::dpi::PhysicalSize;
 use winit::event::{ Event, WindowEvent, KeyEvent, ElementState };
@@ -14,8 +24,12 @@ use winit::keyboard::{ Key, NamedKey };
 use winit::window::{ Window, WindowBuilder };
 
 mod util;
-mod buffers;
-mod texture;
+mod render;
+mod presentation;
+mod parse;
+
+use render::buffers;
+use render::texture;
 
 pub struct BaseState<'a> {
     surface: wgpu::Surface<'a>,
@@ -164,6 +178,8 @@ impl<'a> BaseState<'a> {
         );
 
         let texture = texture::Texture::from_image(&device, &queue, "test.jpeg", texture::TextureSamplerSelection::Linear, None)?;
+
+        presentation::resource_managers::test(&device, &queue);
 
         Ok(Self {
             surface,
