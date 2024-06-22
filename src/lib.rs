@@ -1,35 +1,40 @@
-#![feature(maybe_uninit_array_assume_init)]
-#![feature(const_float_bits_conv)]
-#![feature(const_swap)]
-#![feature(const_mut_refs)]
-#![feature(const_trait_impl)]
-#![feature(const_maybe_uninit_array_assume_init)]
-#![feature(const_maybe_uninit_write)]
-#![feature(generic_const_exprs)]
+// Me: "No, I don't use unstable Rust a lot. That'd make my program more unstable!"
+// Also me:
+#![allow(incomplete_features)]
+#![feature(min_specialization)]
+#![feature(maybe_uninit_array_assume_init, const_maybe_uninit_array_assume_init)]
+#![feature(const_float_bits_conv, const_swap, const_mut_refs, const_trait_impl, const_maybe_uninit_write)]
+#![feature(generic_arg_infer)]
 #![feature(exclusive_wrapper)]
 #![feature(let_chains)]
 #![feature(iterator_try_collect)]
-#![feature(min_specialization)]
 #![feature(const_refs_to_cell)]
-#![feature(generic_arg_infer)]
-#![feature(allocator_api)]
-#![feature(alloc_layout_extra)]
-#![feature(slice_ptr_get)]
+#![feature(allocator_api, alloc_layout_extra, slice_ptr_get)]
 #![feature(box_into_inner)]
+#![feature(generic_const_exprs)]
+#![feature(if_let_guard)]
+#![feature(const_intrinsic_copy)]
+#![feature(coerce_unsized)]
+#![feature(iterator_try_reduce)]
+#![feature(entry_insert)]
 
 use winit::dpi::PhysicalSize;
-use winit::event::{ Event, WindowEvent, KeyEvent, ElementState };
-use winit::event_loop::EventLoop;
+use winit::event::{ WindowEvent, KeyEvent, ElementState };
+use winit::event_loop::{ EventLoop, ActiveEventLoop };
 use winit::keyboard::{ Key, NamedKey };
-use winit::window::{ Window, WindowBuilder };
+use winit::window::{ Window, WindowId, WindowAttributes };
 
-mod util;
-mod render;
-mod presentation;
-mod parse;
+use std::sync::Arc;
 
-use render::buffers;
+pub mod util;
+pub mod render;
+pub mod presentation;
+pub mod parse;
+pub mod shaders;
+
 use render::texture;
+
+use util::fallible_app_handler::{ FallibleAppHandler, FallibleAppHandlerWrap };
 
 pub struct BaseState<'a> {
     surface: wgpu::Surface<'a>,
@@ -37,31 +42,25 @@ pub struct BaseState<'a> {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    window: &'a Window,
-    // Temporary stuff
-    render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    texture: texture::Texture,
-    last_time: std::time::Instant,
+    window: Arc<Window>,
+    presentation_state: presentation::state::PresentationState,
+
+    #[cfg(debug_assertions)]
+    debug_state: util::debug_state::DebugState,
 }
 
 impl<'a> BaseState<'a> {
-    async fn new(window: &'a Window) -> anyhow::Result<BaseState<'a>> {
+    async fn new(window: Window) -> anyhow::Result<BaseState<'a>> {
+        let window_arc = Arc::new(window);
+
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            #[cfg(not(debug_assertions))]
             backends: wgpu::Backends::all(),
-            // If we're compiling in debug mode, I don't want DirectX12 as a
-            // backend because it spams the logs with unfixable soft-errors on
-            // my machine for some reason.
-            #[cfg(debug_assertions)]
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::METAL,
             ..Default::default()
         });
         
-        let surface = instance.create_surface(window)?;
+        let surface = instance.create_surface(window_arc.clone())?;
 
         let adapter = instance.request_adapter(
             &wgpu::RequestAdapterOptions {
@@ -81,14 +80,15 @@ impl<'a> BaseState<'a> {
         ).await?;
 
         let surface_caps = surface.get_capabilities(&adapter);
+
         // Shader code in this tutorial assumes an sRGB surface texture. Using a different
         // one will result in all the colors coming out darker. If you want to support non
         // sRGB surfaces, you'll need to account for that when drawing to the frame.
         let surface_format = surface_caps.formats.iter()
             .copied()
-            .filter(|f| f.is_srgb())
+            .filter(|f| f.eq(&wgpu::TextureFormat::Rgba8UnormSrgb))
             .next()
-            .unwrap_or(surface_caps.formats[0]);
+            .unwrap();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -110,7 +110,7 @@ impl<'a> BaseState<'a> {
                 else { e }
             }).map(|b|{
                 #[cfg(debug_assertions)]
-                log::debug!("Found best Presentmode: {b:?}");
+                log::info!("Found best Presentmode: {b:?}");
                 *b
             }).unwrap_or(wgpu::PresentMode::Fifo),
             alpha_mode: surface_caps.alpha_modes[0],
@@ -120,80 +120,27 @@ impl<'a> BaseState<'a> {
         surface.configure(&device, &config);
 
         texture::init(&device)?;
+        render::camera::init(&device)?;
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let win_size = window_arc.inner_size();
 
-        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Temporary Render Pipeline Layout"),
-            bind_group_layouts: &[texture::TEXTURE_BIND_GROUP_LAYOUT.get().unwrap()],
-            push_constant_ranges: &[]
-        });
+        let presentation_state = presentation::state::PresentationState::new(&device, &queue, win_size, &config)?;
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Temporary Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[
-                    buffers::Vertex::DESC
-                ] },
-            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: "fs_main", targets: &[
-                Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                }),
-            ] }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                // This is a 2D-application, so we don't need any backface-
-                // culling, because there are no back or front faces in 2D.
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
-            multiview: None
-        });
-
-        use wgpu::util::DeviceExt;
-        let vertex_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(buffers::VERTICES),
-                usage: wgpu::BufferUsages::VERTEX,
-            }
-        );
-        let index_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(buffers::INDICES),
-                usage: wgpu::BufferUsages::INDEX,
-            }
-        );
-
-        let texture = texture::Texture::from_image(&device, &queue, "test.jpeg", texture::TextureSamplerSelection::Linear, None)?;
-
-        presentation::resource_managers::test(&device, &queue);
+        // presentation::resource_managers::TEXTURE_MANAGER.insert(
+        //     "test".to_string(),
+        //     Arc::new(texture::Texture::from_image(&device, &queue, "test.jpeg", texture::TextureSamplerSelection::Linear, None)?)
+        // )?;
 
         Ok(Self {
             surface,
             device,
             queue,
             config,
-            size: window.inner_size(),
-            window,
-            // Stuff that will be removed later
-            render_pipeline,
-            vertex_buffer,
-            index_buffer,
-            texture,
-            last_time: std::time::Instant::now(),
+            size: win_size,
+            window: window_arc,
+            presentation_state,
+            #[cfg(debug_assertions)]
+            debug_state: util::debug_state::DebugState::new(),
         })
     }
 
@@ -207,20 +154,19 @@ impl<'a> BaseState<'a> {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.presentation_state.on_resize(new_size, &self.device).unwrap();
         }
     }
 
     fn input(&mut self, event: &WindowEvent) -> bool {
-        // The bool indicates wether or not the upplied event shouldn't be
-        // processed further by the event loop. If `true`, the event won't be
-        // processed any further. If `false`, it will be processed further.
-        false
+        self.presentation_state.on_input(event)
     }
 
     fn update(&mut self) {
-        let dt = self.last_time.elapsed().as_secs_f64();
-        self.last_time = std::time::Instant::now();
-        log::debug!("FPS: {}", (1000.0/dt).floor() / 1000.0);
+        self.presentation_state.update();
+
+        #[cfg(debug_assertions)]
+        self.debug_state.update().unwrap();
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -228,106 +174,96 @@ impl<'a> BaseState<'a> {
 
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
+        self.presentation_state.begin_render(&self.queue).unwrap();        
+        let presentation_commands = self.presentation_state.do_render(&view, &self.device, &self.queue).unwrap();
 
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
-
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.texture.bind_group(), &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..buffers::INDICES.len() as u32, 0, 0..1);
-        }
-    
         // submit will accept anything that implements IntoIter
-        self.queue.submit(std::iter::once(encoder.finish()));
+        self.queue.submit([presentation_commands]);
         output.present();
 
         Ok(())
     }
 }
 
-pub async fn run() -> anyhow::Result<()> {
-    let (event_loop, window) = init_window()?;
+#[derive(Default)]
+pub struct App<'a> {
+    base_state: Option<BaseState<'a>>
+}
 
-    let mut base_state = BaseState::new(&window).await?;
+impl<'a> FallibleAppHandler<()> for App<'a> {
+    async fn resumed(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
+        if self.base_state.is_none() {
+            let window = init_window(event_loop)?;
+            self.base_state = Some(BaseState::new(window).await?);
+        }
+        Ok(())
+    }
 
-    event_loop.run(|event, event_loop| {
+    async fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) -> anyhow::Result<()> {
+        let base_state = if self.base_state.is_some() {
+            self.base_state.as_mut().unwrap()
+        } else {
+            return Ok(())
+        };
+        if base_state.input(&event) { return Ok(()); }
         match event {
-            Event::WindowEvent { window_id, event } if window_id == window.id() => if !base_state.input(&event) {
-                match event {
-                    WindowEvent::CloseRequested | WindowEvent::KeyboardInput { event: KeyEvent { logical_key: Key::Named(NamedKey::Escape), state: ElementState::Pressed, .. }, .. } => {
-                        event_loop.exit();
-                    },
-                    WindowEvent::Resized(new_size) => {
-                        base_state.resize(new_size);
-                    },
-                    WindowEvent::ScaleFactorChanged { scale_factor, mut inner_size_writer } => {
-                        let new_inner_size = {
-                            let s = base_state.window().inner_size();
-                            PhysicalSize { width: (s.width as f64 * scale_factor) as u32, height: (s.height as f64 * scale_factor) as u32 }
-                        };
-                        if let Err(e) = inner_size_writer.request_inner_size(new_inner_size) {
-                            log::error!("Error resizing window on scale factor change: {e}");
-                            base_state.resize(window.inner_size());
-                        } else {
-                            base_state.resize(new_inner_size);
-                        }
-                    },
-                    WindowEvent::RedrawRequested => {
-                        base_state.update();
-                        match base_state.render() {
-                            Ok(_) => {},
-                            Err(wgpu::SurfaceError::Lost) => base_state.resize(base_state.size),
-                            Err(wgpu::SurfaceError::OutOfMemory) => {
-                                log::error!("System or GPU is out of memory! Exiting application...");
-                                event_loop.exit()
-                            },
-                            Err(e) => {
-                                log::error!("Error with GPU Surface: {e}")
-                            }
-                        }
-                        base_state.window().request_redraw();
-                    },
-                    _ => {}
+            WindowEvent::CloseRequested | WindowEvent::KeyboardInput { event: KeyEvent { logical_key: Key::Named(NamedKey::Escape), state: ElementState::Pressed, .. }, .. } => {
+                event_loop.exit();
+            },
+            WindowEvent::Resized(new_size) => {
+                base_state.resize(new_size);
+            },
+            WindowEvent::ScaleFactorChanged { scale_factor, mut inner_size_writer } => {
+                let new_inner_size = {
+                    let s = base_state.window().inner_size();
+                    PhysicalSize { width: (s.width as f64 * scale_factor) as u32, height: (s.height as f64 * scale_factor) as u32 }
+                };
+                if let Err(e) = inner_size_writer.request_inner_size(new_inner_size) {
+                    log::error!("Error resizing window on scale factor change: {e}");
+                    base_state.resize(base_state.window.inner_size());
+                } else {
+                    base_state.resize(new_inner_size);
                 }
+            },
+            WindowEvent::RedrawRequested => {
+                base_state.update();
+                match base_state.render() {
+                    Ok(_) => {},
+                    Err(wgpu::SurfaceError::Lost) => base_state.resize(base_state.size),
+                    Err(wgpu::SurfaceError::OutOfMemory) => {
+                        log::error!("System or GPU is out of memory! Exiting application...");
+                        event_loop.exit()
+                    },
+                    Err(e) => {
+                        log::error!("Error with GPU Surface: {e}")
+                    }
+                }
+                base_state.window.request_redraw();
             },
             _ => {}
         }
-    })?;
+        Ok(())
+    }
+}
+
+pub async fn run() -> anyhow::Result<()> {
+    let event_loop = EventLoop::new()?;
+
+    let mut state_wrap = FallibleAppHandlerWrap::from(App::default());
+
+    event_loop.run_app(&mut state_wrap)?;
 
     Ok(())
 }
 
-fn init_window() -> anyhow::Result<(EventLoop<()>, Window)> {
-    let event_loop = EventLoop::new()?;
-    let window = WindowBuilder::new()
-        .with_inner_size(PhysicalSize::<u32>::from(util::consts::WINDOW_SIZE))
-        .with_resizable(true)
-        .with_resize_increments(PhysicalSize::<u32>::from(util::consts::WINDOW_RESIZE_INCREMENTS))
-        .with_title(util::consts::WINDOW_TITLE)
-        .with_window_icon(Some(winit::window::Icon::from_rgba(util::consts::ICON_DATA.as_raw().clone(), util::consts::ICON_DATA.width(), util::consts::ICON_DATA.height())?))
-        .build(&event_loop)?;
-    Ok((event_loop, window))
+fn init_window(event_loop: &ActiveEventLoop) -> anyhow::Result<Window> {
+    let window = event_loop.create_window(
+        WindowAttributes::default()
+            .with_inner_size(PhysicalSize::<u32>::from(util::consts::WINDOW_SIZE))
+            .with_resizable(true)
+            .with_resize_increments(PhysicalSize::<u32>::from(util::consts::WINDOW_RESIZE_INCREMENTS))
+            .with_title(util::consts::WINDOW_TITLE)
+            .with_window_icon(Some(winit::window::Icon::from_rgba(util::consts::ICON_DATA.as_raw().clone(), util::consts::ICON_DATA.width(), util::consts::ICON_DATA.height())?))
+    )?;
+    Ok(window)
 }

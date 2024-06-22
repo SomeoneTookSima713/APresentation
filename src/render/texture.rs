@@ -4,10 +4,11 @@ pub static TEXTURE_SAMPLERS: OnceLock<TextureSamplerList> = OnceLock::new();
 pub static TEXTURE_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
 
 pub struct TextureSamplerList {
-    pixel_perfect: wgpu::Sampler,
-    linear: wgpu::Sampler,
+    pub pixel_perfect: wgpu::Sampler,
+    pub linear: wgpu::Sampler,
 }
 
+#[derive(Clone, Copy)]
 pub enum TextureSamplerSelection {
     PixelPerfect,
     Linear,
@@ -86,6 +87,7 @@ pub struct Texture {
     sampler: &'static wgpu::Sampler
 }
 
+#[allow(unused)]
 impl Texture {
     pub fn raw_texture(&self) -> &wgpu::Texture {
         &self.texture
@@ -153,10 +155,7 @@ impl Texture {
 
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let sampler_ref = match (sampler, TEXTURE_SAMPLERS.get().ok_or(anyhow::anyhow!("texture::init() wasn't called!"))?) {
-            (TextureSamplerSelection::Linear, s) => &s.linear,
-            (TextureSamplerSelection::PixelPerfect, s) => &s.pixel_perfect
-        };
+        let sampler_ref = sampler.get_ref()?;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(path.as_ref().to_string_lossy().as_ref()),
@@ -230,10 +229,7 @@ impl Texture {
 
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let sampler_ref = match (sampler, TEXTURE_SAMPLERS.get().ok_or(anyhow::anyhow!("texture::init() wasn't called!"))?) {
-            (TextureSamplerSelection::Linear, s) => &s.linear,
-            (TextureSamplerSelection::PixelPerfect, s) => &s.pixel_perfect
-        };
+        let sampler_ref = sampler.get_ref()?;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -258,12 +254,22 @@ impl Texture {
         })
     }
 
+    /// Constructs a texture on the gpu based on a RGBA-color.
+    /// 
+    /// # Panics
+    /// This function, just like basically all functions from this module,
+    /// panics if the module's [`init()`]-function() wasn't called.
+    pub fn from_color(device: &wgpu::Device, queue: &wgpu::Queue, color: [u8;4], size: (u32, u32), sampler: TextureSamplerSelection, additional_usages: Option<wgpu::TextureUsages>) -> anyhow::Result<Self> {
+        let data = color.repeat(size.0 as usize * size.1 as usize);
+        Self::from_data(device, queue, data, size, sampler, additional_usages)
+    }
+
     /// Creates a new empty texture on the gpu.
     /// 
     /// # Panics
     /// This function, just like basically all functions from this module,
     /// panics if this module's [`init()`]-function() wasn't called.
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, size: (u32, u32), sampler: TextureSamplerSelection, additional_usages: Option<wgpu::TextureUsages>) -> anyhow::Result<Self> {
+    pub fn new(device: &wgpu::Device, size: (u32, u32), sampler: TextureSamplerSelection, additional_usages: Option<wgpu::TextureUsages>) -> anyhow::Result<Self> {
         let texture_size = wgpu::Extent3d {
             width: size.0,
             height: size.1,
@@ -283,10 +289,7 @@ impl Texture {
 
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let sampler_ref = match (sampler, TEXTURE_SAMPLERS.get().ok_or(anyhow::anyhow!("texture::init() wasn't called!"))?) {
-            (TextureSamplerSelection::Linear, s) => &s.linear,
-            (TextureSamplerSelection::PixelPerfect, s) => &s.pixel_perfect
-        };
+        let sampler_ref = sampler.get_ref()?;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,

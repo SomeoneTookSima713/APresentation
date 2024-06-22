@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{ OnceLock, Mutex };
+use std::sync::Mutex;
 use std::rc::Rc;
 
 use once_cell::sync::Lazy;
@@ -8,18 +8,13 @@ use once_cell::sync::Lazy;
 use mlua::Function;
 
 mod property_compatible_impl;
-mod property_structure;
-mod alignment;
+pub mod property_structure;
+pub mod alignment;
+pub mod common_properties;
 
 pub use property_structure::*;
 
-pub use alignment::{ Alignment, Align1D };
-
-/// # Safety
-/// This static **must only be used in the main thread, nowhere else!**
-/// If you use this static outside of the main thread, data races and
-/// undefined behaviour are bound to happen!
-static mut PROPERTY_ENV: OnceLock<HashMap<&'static str, PropEnvVal>> = OnceLock::new();
+pub use alignment::Alignment;
 
 static RNG: Mutex<Lazy<rand::rngs::StdRng>> = Mutex::new(Lazy::new(|| {
     use rand::SeedableRng;
@@ -27,7 +22,24 @@ static RNG: Mutex<Lazy<rand::rngs::StdRng>> = Mutex::new(Lazy::new(|| {
 }));
 
 #[derive(Clone)]
-enum PropEnvVal {
+pub struct PropertyEnvironment(pub(self) HashMap<&'static str, PropEnvVal>);
+
+impl std::ops::Deref for PropertyEnvironment {
+    type Target = HashMap<&'static str, PropEnvVal>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for PropertyEnvironment {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Clone)]
+pub enum PropEnvVal {
     Number(f64),
     Function(mlua::Function<'static>),
     Table(HashMap<&'static str, PropEnvVal>)
@@ -70,7 +82,8 @@ pub enum PropertyValue<'lua> {
     Dict(Rc<RefCell<HashMap<String, Property<'lua>>>>),
 }
 
-#[derive(Clone)]
+#[allow(unused)]
+#[derive(Clone, Debug)]
 /// A Property which ensures that it has been fully evaluated. This is
 /// neccessary because regular [`PropertyValue`]s can still contain evaluatable
 /// [`Property`]s. That also means that a regular [`PropertyValue`] is a
@@ -143,7 +156,7 @@ impl<'a> From<mlua::Value<'a>> for Property<'a> {
                             }
                             map_hm.insert(k.into(), v);
                         },
-                        Err(e) => {
+                        Err(_) => {
                             panic!("This error shouldn't happen! Conversion from lua value *to lua value* failed!");
                         }
                     }
@@ -178,7 +191,7 @@ impl<'a> From<mlua::Value<'a>> for Property<'a> {
 }
 
 impl<'lua> mlua::FromLuaMulti<'lua> for Property<'lua> {
-    fn from_lua_multi(mut values: mlua::prelude::LuaMultiValue<'lua>, lua: &'lua mlua::prelude::Lua) -> mlua::prelude::LuaResult<Self> {
+    fn from_lua_multi(mut values: mlua::prelude::LuaMultiValue<'lua>, _lua: &'lua mlua::prelude::Lua) -> mlua::prelude::LuaResult<Self> {
         match values.len() {
             0 => Err(mlua::Error::runtime("Can't convert nil to value!")),
             1 => {
@@ -197,6 +210,7 @@ impl<'lua, T: PropertyCompatible<'lua>> From<&'lua T> for Property<'lua> {
     }
 }
 
+#[allow(unused)]
 impl<'a> Property<'a> {
     /// Converts any convertible type into a [`Property`].
     pub fn from_constant<T: PropertyCompatible<'a> + 'a>(c: &'a T) -> Self {
@@ -205,11 +219,8 @@ impl<'a> Property<'a> {
 
     /// Converts any lua code block (in string form) into a [`Property`], the
     /// code block's return value being the value of the property.
-    pub fn from_lua_string<S: AsRef<String>>(lua: &'static mlua::Lua, string: S) -> anyhow::Result<Self> {
-        // TODO: Maybe remove this clone? (Could be a bottleneck if I have to reinitialize lua functions a lot)
-        let env = unsafe { PROPERTY_ENV.get().ok_or(anyhow::anyhow!("property::init() wasn't called!"))? }.clone();
-
-        let func = lua.load(string.as_ref()).set_environment(env).into_function()?;
+    pub fn from_lua_string<S: AsRef<String>>(lua: &'static mlua::Lua, string: S, env: PropertyEnvironment) -> anyhow::Result<Self> {
+        let func = lua.load(string.as_ref()).set_environment((*env).clone()).into_function()?;
 
         Ok(Self::Eval(func))
     }
@@ -244,7 +255,7 @@ impl<'a> Property<'a> {
     }
 }
 
-pub fn init(lua: &'static mlua::Lua) -> anyhow::Result<()> {
+pub fn get_environment(lua: &'static mlua::Lua) -> anyhow::Result<PropertyEnvironment> {
     let mut hm = HashMap::new();
 
     let mut math = HashMap::new();
@@ -301,9 +312,7 @@ pub fn init(lua: &'static mlua::Lua) -> anyhow::Result<()> {
 
     // Lua Env
     hm.insert("math", PropEnvVal::Table(math));
-
-    unsafe { &PROPERTY_ENV }.set(hm).map_err(|_|anyhow::anyhow!("property::init() was called twice!"))?;
-    Ok(())
+    Ok(PropertyEnvironment(hm))
 }
 
 pub trait PropertyCompatible<'lua> {
@@ -311,46 +320,57 @@ pub trait PropertyCompatible<'lua> {
     /// construct itself from.
     const STRUCTURE: PropertyStructure;
 
-    fn compatible_property_structure(&self) -> PropertyStructure {
-        Self::STRUCTURE
-    }
-
     fn convert_from<A: mlua::IntoLuaMulti<'lua> + Clone>(value: Property<'lua>, args: A) -> anyhow::Result<Self>
     where Self: Sized;
 
     fn convert_into(&'lua self) -> Property<'lua>;
+
+    fn move_into(self) -> Property<'lua>
+    where Self: Sized;
 }
 
 #[derive(Clone)]
 pub struct TypedProperty<'lua, T>
 where T: PropertyCompatible<'lua> {
     prop: Property<'lua>,
-    converted: Option<T>
+    converted: RefCell<Option<T>>
 }
 
 impl<'lua, T> TypedProperty<'lua, T>
 where T: PropertyCompatible<'lua> {
     /// Creates a new [`TypedProperty`] from a regular [`Property`].
     pub fn new(base: Property<'lua>) -> anyhow::Result<Self> {
-        if !T::STRUCTURE.check_structure(&base) {
+        if !T::STRUCTURE.check_structure(&base)? {
             anyhow::bail!("Incompatible property structure!");
         }
 
-        Ok(Self { prop: base, converted: None })
+        Ok(Self { prop: base, converted: RefCell::new(None) })
     }
 
     /// Deletes the internal cache for the evaluated value.
     /// 
     /// If you want to deliberately reevaluate the value, use this function.
-    pub fn delete_cache(&mut self) {
-        self.converted = None;
+    /// 
+    /// # Returns
+    /// Returns a bool indicating if the deletion completed successfully. If
+    /// the value contained in the cache is still borrowed by some part of the
+    /// program, this will return an error.
+    pub fn delete_cache(&self) -> bool {
+        match self.converted.try_borrow_mut() {
+            Ok(mut b) => { *b = None; true },
+            Err(_) => false
+        }
     }
 
-    pub fn get<A: mlua::IntoLuaMulti<'lua> + Clone>(&mut self, args: A) -> anyhow::Result<&T> {
-        if self.converted.is_none() {
-            self.converted = Some(T::convert_from(self.prop.clone(), args)?);
+    pub fn get<A: mlua::IntoLuaMulti<'lua> + Clone>(&self, args: A) -> anyhow::Result<std::cell::Ref<T>> {
+        let Ok(mut borrow) = self.converted.try_borrow_mut() else {
+            anyhow::bail!("Cache of TypedProperty couldn't be mutably borrowed!");
+        };
+        if borrow.is_none() {
+            *borrow = Some(T::convert_from(self.prop.clone(), args)?);
         }
-        self.converted.as_ref().ok_or(anyhow::anyhow!("[TypedProperty].converted was None even though it was set the literal line before!"))
+        drop(borrow);
+        std::cell::Ref::filter_map(self.converted.borrow(), |r| r.as_ref()).map_err(|_|anyhow::anyhow!("[TypedProperty].converted was None even though it was set the literal line before!"))
     }
 }
 
@@ -358,16 +378,17 @@ impl<'lua, T> PropertyCompatible<'lua> for TypedProperty<'lua, T>
 where T: PropertyCompatible<'lua> {
     const STRUCTURE: PropertyStructure = T::STRUCTURE;
 
-    fn compatible_property_structure(&self) -> PropertyStructure {
-        Self::STRUCTURE
-    }
-
-    fn convert_from<A: mlua::IntoLuaMulti<'lua> + Clone>(value: Property<'lua>, args: A) -> anyhow::Result<Self>
+    fn convert_from<A: mlua::IntoLuaMulti<'lua> + Clone>(value: Property<'lua>, _args: A) -> anyhow::Result<Self>
         where Self: Sized {
         Ok(Self::new(value)?)
     }
 
     fn convert_into(&self) -> Property<'lua> {
         self.prop.clone()
+    }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        self.prop
     }
 }

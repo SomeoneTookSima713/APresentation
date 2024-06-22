@@ -26,6 +26,11 @@ impl<'lua> PropertyCompatible<'lua> for Tuple {
     fn convert_into(&'lua self) -> Property<'lua> {
         Property::Constant(PropertyValue::List(Rc::new(RefCell::new(Vec::from([for_tuples!( #( Tuple.convert_into() ),* )])))))
     }
+
+    fn move_into(self) -> Property<'lua>
+    where Self: Sized {
+        Property::Constant(PropertyValue::List(Rc::new(RefCell::new(Vec::from([for_tuples!( #( Tuple.move_into() ),* )])))))
+    }
 }
 
 impl<'lua, T: PropertyCompatible<'lua>, const N: usize> PropertyCompatible<'lua> for [T;N] {
@@ -42,6 +47,11 @@ impl<'lua, T: PropertyCompatible<'lua>, const N: usize> PropertyCompatible<'lua>
 
     fn convert_into(&'lua self) -> Property<'lua> {
         Property::Constant(PropertyValue::List(Rc::new(RefCell::new(self.iter().map(|v|v.convert_into()).collect()))))
+    }
+
+    fn move_into(self) -> Property<'lua>
+    where Self: Sized {
+        Property::Constant(PropertyValue::List(Rc::new(RefCell::new(self.into_iter().map(|v|v.move_into()).collect()))))
     }
 }
 
@@ -61,6 +71,11 @@ impl<'lua> PropertyCompatible<'lua> for f32 {
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::Float(*self as f64))
     }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::Float(self as f64))
+    }
 }
 
 impl<'lua> PropertyCompatible<'lua> for f64 {
@@ -78,6 +93,11 @@ impl<'lua> PropertyCompatible<'lua> for f64 {
 
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::Float(*self))
+    }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::Float(self))
     }
 }
 
@@ -97,6 +117,11 @@ impl<'lua> PropertyCompatible<'lua> for u8 {
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::UInt(*self as u64))
     }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::UInt(self as u64))
+    }
 }
 
 impl<'lua> PropertyCompatible<'lua> for u16 {
@@ -114,6 +139,11 @@ impl<'lua> PropertyCompatible<'lua> for u16 {
 
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::UInt(*self as u64))
+    }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::UInt(self as u64))
     }
 }
 
@@ -133,6 +163,11 @@ impl<'lua> PropertyCompatible<'lua> for u32 {
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::UInt(*self as u64))
     }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::UInt(self as u64))
+    }
 }
 
 impl<'lua> PropertyCompatible<'lua> for u64 {
@@ -150,6 +185,11 @@ impl<'lua> PropertyCompatible<'lua> for u64 {
 
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::UInt(*self))
+    }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::UInt(self))
     }
 }
 
@@ -169,6 +209,11 @@ impl<'lua> PropertyCompatible<'lua> for i8 {
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::Int(*self as i64))
     }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::Int(self as i64))
+    }
 }
 
 impl<'lua> PropertyCompatible<'lua> for i16 {
@@ -186,6 +231,11 @@ impl<'lua> PropertyCompatible<'lua> for i16 {
 
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::Int(*self as i64))
+    }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::Int(self as i64))
     }
 }
 
@@ -205,6 +255,11 @@ impl<'lua> PropertyCompatible<'lua> for i32 {
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::Int(*self as i64))
     }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::Int(self as i64))
+    }
 }
 
 impl<'lua> PropertyCompatible<'lua> for i64 {
@@ -223,6 +278,11 @@ impl<'lua> PropertyCompatible<'lua> for i64 {
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::Int(*self))
     }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::Int(self))
+    }
 }
 
 impl<'lua> PropertyCompatible<'lua> for bool {
@@ -239,10 +299,15 @@ impl<'lua> PropertyCompatible<'lua> for bool {
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::Bool(*self))
     }
+
+    fn move_into(self) -> Property<'lua>
+        where Self: Sized {
+        Property::Constant(PropertyValue::Bool(self))
+    }
 }
 
 impl<'lua> PropertyCompatible<'lua> for Rc<String> {
-    const STRUCTURE: PropertyStructure = PropertyStructure::String;
+    const STRUCTURE: PropertyStructure = PropertyStructure::String(None);
 
     fn convert_from<A: mlua::IntoLuaMulti<'lua> + Clone>(value: Property<'lua>, args: A) -> anyhow::Result<Self>
         where Self: Sized {
@@ -254,6 +319,10 @@ impl<'lua> PropertyCompatible<'lua> for Rc<String> {
 
     fn convert_into(&self) -> Property<'lua> {
         Property::Constant(PropertyValue::String(self.clone()))
+    }
+
+    fn move_into(self) -> Property<'lua> {
+        Property::Constant(PropertyValue::String(self))
     }
 }
 
@@ -270,5 +339,9 @@ impl<'lua, T: PropertyCompatible<'lua>> PropertyCompatible<'lua> for Vec<T> {
     
     fn convert_into(&'lua self) -> Property<'lua> {
         Property::Constant(PropertyValue::List(Rc::new(RefCell::new(self.iter().map(|v|v.convert_into()).collect()))))
+    }
+
+    fn move_into(self) -> Property<'lua> {
+        Property::Constant(PropertyValue::List(Rc::new(RefCell::new(self.into_iter().map(|v|v.move_into()).collect()))))
     }
 }

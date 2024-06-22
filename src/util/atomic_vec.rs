@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::alloc::{ Layout, Allocator, Global };
 use std::ops::{ Deref, DerefMut };
 use std::sync::atomic::{ AtomicBool, AtomicPtr, AtomicUsize, AtomicU8, Ordering };
@@ -42,9 +44,7 @@ impl<T> AtomicVec<T> {
 
     pub fn new(initial_capacity: usize) -> anyhow::Result<Self> {
         // Minimum capacity of four elements due to how the resize() method works.
-        let (layout, off) = Self::LAYOUT.repeat(initial_capacity.max(4))?;
-
-        log::info!("{:?} -> {layout:?} (Offset: {off})", Self::LAYOUT);
+        let (layout, _) = Self::LAYOUT.repeat(initial_capacity.max(4))?;
 
         let nonnull = Global::default().allocate(layout)?;
         let capacity = nonnull.len() / std::mem::size_of::<(T, AtomicU8)>();
@@ -141,7 +141,7 @@ impl<T> AtomicVec<T> {
         Ok(())
     }
 
-    pub fn push(&self, value: T) -> anyhow::Result<()> {
+    pub fn push(&self, value: T) -> anyhow::Result<usize> {
         while self.mutable_operation_ongoing() {
             std::hint::spin_loop();
         }
@@ -157,7 +157,7 @@ impl<T> AtomicVec<T> {
         }
         
         self.pushing.store(false, Ordering::Release);
-        Ok(())
+        Ok(len)
     }
 
     /// Clears the whole [`AtomicVec`], returning a regular [`Vec`] of it's

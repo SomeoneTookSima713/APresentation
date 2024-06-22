@@ -1,5 +1,6 @@
 fn main() -> anyhow::Result<()> {
     init_logger();
+
     pollster::block_on(apresentation::run())
 }
 

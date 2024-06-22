@@ -67,13 +67,14 @@ impl Into<[f64;2]> for Align2D {
     }
 }
 
+#[allow(unused)]
 impl Align2D {
     pub const TOP_LEFT: Align2D      = Align2D { x: Align1D::Start,  y: Align1D::Start  };
     pub const TOP_CENTER: Align2D    = Align2D { x: Align1D::Middle, y: Align1D::Start  };
     pub const TOP_RIGHT: Align2D     = Align2D { x: Align1D::End,    y: Align1D::Start  };
-    pub const MIDDLE_LEFT: Align2D   = Align2D { x: Align1D::Start,  y: Align1D::Middle };
-    pub const MIDDLE_CENTER: Align2D = Align2D { x: Align1D::Middle, y: Align1D::Middle };
-    pub const MIDDLE_RIGHT: Align2D  = Align2D { x: Align1D::End,    y: Align1D::Middle };
+    pub const MID_LEFT: Align2D      = Align2D { x: Align1D::Start,  y: Align1D::Middle };
+    pub const MID_CENTER: Align2D    = Align2D { x: Align1D::Middle, y: Align1D::Middle };
+    pub const MID_RIGHT: Align2D     = Align2D { x: Align1D::End,    y: Align1D::Middle };
     pub const BOTTOM_LEFT: Align2D   = Align2D { x: Align1D::Start,  y: Align1D::End    };
     pub const BOTTOM_CENTER: Align2D = Align2D { x: Align1D::Middle, y: Align1D::End    };
     pub const BOTTOM_RIGHT: Align2D  = Align2D { x: Align1D::End,    y: Align1D::End    };
@@ -93,6 +94,11 @@ impl<'lua> PropertyCompatible<'lua> for Align1D {
 
     fn convert_into(&'lua self) -> Property<'lua> {
         Property::Constant(PropertyValue::Float((*self).into()))
+    }
+
+    fn move_into(self) -> Property<'lua>
+    where Self: Sized {
+        Property::Constant(PropertyValue::Float(self.into()))
     }
 }
 
@@ -125,6 +131,13 @@ impl<'lua> PropertyCompatible<'lua> for Align2D {
         Property::Constant(PropertyValue::Dict(Rc::new(RefCell::new(HashMap::from([
             ("x".to_string(), self.x.convert_into()),
             ("y".to_string(), self.y.convert_into())
+        ])))))
+    }
+
+    fn move_into(self) -> Property<'lua> {
+        Property::Constant(PropertyValue::Dict(Rc::new(RefCell::new(HashMap::from([
+            ("x".to_string(), self.x.move_into()),
+            ("y".to_string(), self.y.move_into())
         ])))))
     }
 }

@@ -1,0 +1,33 @@
+# Global configuration
+
+# How the program should handle lua code snippets.
+# Allowed Values:
+#   eval     - Evaluates the snippet as a lua expression and uses that value.
+#              Example snippet: "5 + x"
+#   function - Runs the snippet as a function and uses it's return value.
+#              Example snippet: """
+#              local x = math.min(scr.w, scr.h)
+#              return 0.2 * x
+#              """
+lua-expr-type = "eval"
+
+[[resource]]
+    type = "Image"
+    name = "test"
+    file = "test.jpeg"
+    sampler = "Linear"
+
+[[slide]]
+    # Slide-specific configuration
+
+    [[slide.element]]
+    # Singular slide element
+    type = "Rect"
+    position = [ 0,0 ]
+    # Alignment is a special property: It either matches against a predefined
+    # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
+    # a list of two numbers.
+    alignment = "MID_CENTER"
+    color = "#808080ff"
+    corner_rounding = 0.75
+    texture = "DEFAULT"

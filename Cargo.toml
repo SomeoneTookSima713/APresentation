@@ -3,12 +3,12 @@ name = "apresentation"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-wgpu = "0.19"
-winit = "0.29"
-image = { version="0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
+wgpu = "0.20"
+include-wgsl-oil = { version = "0.2" }
+winit = { version = "0.30" }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+palette = "0.7"
 
 pollster = "0.3"
 
@@ -16,14 +16,20 @@ log = "*"
 pretty_env_logger = "0.5"
 
 anyhow = "*"
-once_cell = "*"
 bytemuck = { version = "1.12", features = ["derive"] }
+once_cell = "*"
+dynstack = "0.4"
+downcast-rs = "1.2"
 
-nalgebra = "0.32"
-mlua = { version = "0.9", features = ["luajit", "vendored"] }
+glam = "0.27"
+mlua = { version = "0.9", features = ["luajit", "vendored", "send"] }
 rand = "0.8"
+regex = "1"
 
 impl-trait-for-tuples = "0.2"
 xxhash-rust = { version = "0.8", features = ["xxh3", "const_xxh3"] }
+try-iterator = "1"
+hex = "0.4"
 
-arc-swap = "1.7"
+serde = "1"
+toml = "0.8"

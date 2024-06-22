@@ -1,9 +1,22 @@
+#![allow(unused)]
+
 use std::borrow::Borrow;
 use std::cell::{ RefCell, Ref, RefMut };
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use once_cell::sync::Lazy;
+
 use crate::presentation::property::{ Property, PropertyValue };
+
+pub mod resource;
+
+pub mod toml;
+use toml::TomlParser;
+
+pub static PARSER_IMPLEMENTATIONS: Lazy<HashMap<String, Box<dyn PresentationParserObjectSafe>>> = Lazy::new(|| [
+    (TomlParser::FILE_EXTENSION, TomlParser)
+].into_iter().map(|(s, v)| (s.to_owned(), Box::new(v) as Box<dyn PresentationParserObjectSafe>)).collect());
 
 #[derive(Clone)]
 pub struct ParseableRenderable<'lua> {
@@ -36,4 +49,31 @@ impl<'lua> ParseableRenderable<'lua> {
     pub fn into_property_value(self) -> PropertyValue<'lua> {
         PropertyValue::Dict(self.properties)
     }
+}
+
+pub struct ParseablePresentation {
+    pub slides: Vec<ParseableSlide>,
+    pub resources: Vec<Box<dyn resource::Resource>>
+}
+
+pub struct ParseableSlide {
+    pub renderables: Vec<ParseableRenderable<'static>>
+}
+
+pub trait PresentationParser: Send + Sync {
+    const FILE_EXTENSION: &'static str;
+
+    fn parse(file: String) -> anyhow::Result<ParseablePresentation>;
+}
+
+pub trait PresentationParserObjectSafe: Send + Sync {
+    fn get_file_extension(&self) -> &'static str;
+
+    fn parse(&self, file: String) -> anyhow::Result<ParseablePresentation>;
+}
+
+impl<T: PresentationParser> PresentationParserObjectSafe for T {
+    fn get_file_extension(&self) -> &'static str { Self::FILE_EXTENSION }
+
+    fn parse(&self, file: String) -> anyhow::Result<ParseablePresentation> { <Self as PresentationParser>::parse(file) }
 }

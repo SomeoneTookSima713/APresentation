@@ -1,3 +1,12 @@
+use std::collections::HashMap;
+use std::sync::RwLock;
+
+use once_cell::sync::Lazy;
+
+use regex::Regex;
+
+use try_iterator::prelude::*;
+
 use super::{ PropertyValue, Property };
 
 /// Describes a structure of a lua type.
@@ -42,7 +51,10 @@ pub enum PropertyStructure {
     /// This represents any lua number, also integers.
     Number,
     /// This represents any lua string.
-    String,
+    /// 
+    /// The [`Option`] contained in this variant is an optional RegExp the
+    /// lua value has to match if supplied.
+    String(Option<&'static str>),
     /// This represents any boolean.
     Bool,
     /// This represents any lua array (a table which's values' indices aren't
@@ -65,55 +77,107 @@ pub enum PropertyStructure {
     Or(&'static [PropertyStructure]),
 }
 
+static REGEXP_CACHE: Lazy<RwLock<HashMap<String, Regex>>> = Lazy::new(|| RwLock::new(HashMap::new()));
+
 impl PropertyStructure {
     /// Checks if the structure of the supplied [`Property`] *could* be
     /// supported by this [`PropertyStructure`].
     /// 
-    /// Emphasis on *could* here, because this function doen't check the return
+    /// Emphasis on *could* here, because this function doesn't check the return
     /// value of functions, thus you could put a lua function returning a
     /// string in the place of a number and this function would still return
     /// `true`, so you should still do additional checks on top of using this
     /// function.
-    pub fn check_structure<'lua>(&self, property: &Property<'lua>) -> bool {
-        if let &Property::Eval(_) = property { return true; }
+    pub fn check_structure<'lua>(&self, property: &Property<'lua>) -> anyhow::Result<bool> {
+        if let &Property::Eval(_) = property { return Ok(true); }
         if let &Property::Constant(ref val) = property {
             self.check_structure_of_value(val)
         } else {
-            false
+            Ok(false)
         }
     }
 
-    fn check_structure_of_value<'lua>(&self, value: &PropertyValue<'lua>) -> bool {
+    fn check_structure_of_value<'lua>(&self, value: &PropertyValue<'lua>) -> anyhow::Result<bool> {
         match (self, value) {
             (
                 PropertyStructure::Number,
                 &PropertyValue::Int(_) | PropertyValue::UInt(_) | PropertyValue::Float(_)
-            ) => true,
+            ) => Ok(true),
             (
-                PropertyStructure::String,
+                PropertyStructure::String(None),
                 &PropertyValue::String(_)
-            ) => true,
+            ) => Ok(true),
+            (
+                PropertyStructure::String(Some(regexp)),
+                &PropertyValue::String(ref str)
+            ) => {
+                match REGEXP_CACHE.read() {
+                    Ok(hm) => {
+                        if let Some(exp) = hm.get(*regexp) {
+                            let mut iter = exp.find_iter(str.as_str());
+                            if iter.next().is_some() && iter.next().is_none() {
+                                return Ok(true);
+                            } else {
+                                return Ok(false);
+                            }
+                        }
+                    },
+                    Err(_) => {
+                        log::warn!("RegExp Cache couldn't be read!");
+                    }
+                }
+                match REGEXP_CACHE.write() {
+                    Ok(mut hm) => {
+                        let exp = match Regex::new(regexp) {
+                            Ok(exp) => exp,
+                            Err(e) => {
+                                log::error!("Couldn't parse RegExp: {e}");
+                                anyhow::bail!("Couldn't parse RegExp: {e}");
+                            }
+                        };
+                        let mut iter = exp.find_iter(str.as_str());
+                        let exactly_one_match = iter.next().is_some() && iter.next().is_none();
+                        drop(iter);
+                        hm.insert(regexp.to_string(), exp);
+                        return Ok(exactly_one_match);
+                    },
+                    Err(_) => {
+                        log::warn!("RegExp Cache couldn't be written to!");
+                    }
+                }
+                let exp = match Regex::new(regexp) {
+                    Ok(exp) => exp,
+                    Err(e) => {
+                        log::error!("Couldn't parse RegExp: {e}");
+                        anyhow::bail!("Couldn't parse RegExp: {e}");
+                    }
+                };
+                let mut iter = exp.find_iter(str.as_str());
+                return Ok(iter.next().is_some() && iter.next().is_none());
+            },
             (
                 PropertyStructure::Bool,
                 &PropertyValue::Bool(_)
-            ) => true,
+            ) => Ok(true),
             (
                 PropertyStructure::List(slist),
                 &PropertyValue::List(ref vlist)
-            ) => vlist.borrow().iter().all(|p| slist.iter().any(|s| s.check_structure(p))),
+            ) => Ok(vlist.borrow().iter().try_all(|p| slist.iter().try_any(|s| s.check_structure(p)))?),
             (
                 PropertyStructure::Array(sarr),
                 &PropertyValue::List(ref vlist)
-            ) => sarr.iter().enumerate().all(|(i, s)| vlist.borrow().get(i).map(|p|s.check_structure(p)).unwrap_or(false)),
+            ) => Ok(sarr.iter().enumerate().try_all(|(i, s)| vlist.borrow().get(i).map(|p|s.check_structure(p)).unwrap_or(Ok(false)))?),
             (
                 PropertyStructure::Dict(sdict),
                 &PropertyValue::Dict(ref vdict)
-            ) => sdict.iter().all(|(k,v)| vdict.borrow().get(*k).map(|p| v.check_structure(p)).unwrap_or(false)),
+            ) => Ok(sdict.iter().try_all(|(k,v)| vdict.borrow().get(*k).map(|p| v.check_structure(p)).unwrap_or(Ok(false)))?),
             (
                 PropertyStructure::Or(spossib),
                 val
-            ) => spossib.iter().any(|s| s.check_structure_of_value(val)),
-            _ => false
+            ) => {
+                Ok(spossib.iter().try_any(|s| s.check_structure_of_value(val))?)
+            },
+            _ => Ok(false)
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::hash::{ Hash, Hasher };
+use std::hash::Hash;
 
 pub struct HashableLuaValue<'lua>(mlua::Value<'lua>);
 
