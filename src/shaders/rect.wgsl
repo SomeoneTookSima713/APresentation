@@ -9,7 +9,6 @@ var<uniform> camera: CameraUniform;
 
 struct VertexInput {
     @location(0) position: vec2<f32>,
-    @location(1) tex_coords: vec2<f32>,
 }
 
 struct VertexOutput {
@@ -22,9 +21,10 @@ struct VertexOutput {
 };
 
 struct Instance {
-    @location(2) position: vec3<f32>,
-    @location(3) size: vec2<f32>,
-    @location(4) color: vec4<f32>,
+    @location(1) position: vec3<f32>,
+    @location(2) size: vec2<f32>,
+    @location(3) color: vec4<f32>,
+    @location(4) uv: vec4<f32>,
     @location(5) corner_rounding: f32,
 }
 
@@ -32,14 +32,38 @@ struct Instance {
 fn vs_main(
     model: VertexInput,
     instance: Instance,
+    @builtin(vertex_index) vertex_index: u32,
 ) -> VertexOutput {
+    var index = i32(vertex_index);
     var out: VertexOutput;
     out.clip_position = camera.view_proj * vec4<f32>(
         model.position.x*instance.size.x + instance.position.x,
         model.position.y*instance.size.y + instance.position.y,
         1.0 + instance.position.z, 1.0);
+    // var tex_coords: vec2<f32> = vec2(
+    //     instance.uv.x + instance.uv.z*f32((1-(index+1)%2+index>>1)%2),
+    //     instance.uv.y + instance.uv.w*f32(1-(index+1)>>1)
+    // );
+    var tex_coords: vec2<f32>;
+    switch vertex_index {
+        case 0u: {
+            tex_coords = vec2(instance.uv.x              , instance.uv.y+instance.uv.w);
+        }
+        case 1u: {
+            tex_coords = vec2(instance.uv.x+instance.uv.z, instance.uv.y+instance.uv.w);
+        }
+        case 2u: {
+            tex_coords = vec2(instance.uv.x+instance.uv.z, instance.uv.y);
+        }
+        case 3u: {
+            tex_coords = vec2(instance.uv.x              , instance.uv.y);
+        }
+        default: {
+            tex_coords = vec2(0.0,0.0);
+        }
+    }
     out.color = instance.color;
-    out.tex_coords = model.tex_coords;
+    out.tex_coords = tex_coords;
     out.corner_rounding = instance.corner_rounding;
     out.centered_position = model.position * instance.size;
     out.size = instance.size;

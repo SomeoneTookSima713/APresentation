@@ -1,5 +1,3 @@
-// Me: "No, I don't use unstable Rust a lot. That'd make my program more unstable!"
-// Also me:
 #![allow(incomplete_features)]
 #![feature(min_specialization)]
 #![feature(maybe_uninit_array_assume_init, const_maybe_uninit_array_assume_init)]

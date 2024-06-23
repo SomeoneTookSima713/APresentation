@@ -41,18 +41,23 @@ impl Presentation {
     }
 
     pub fn load_file<P: AsRef<Path>>(path: P, device: &wgpu::Device, queue: &wgpu::Queue) -> anyhow::Result<Self> {
-        use std::io::prelude::*;
         use std::fs;
 
         let str = fs::read_to_string(path.as_ref())?;
         let ext = path.as_ref().extension().ok_or(anyhow::anyhow!("Couldn't determine the presentation's file extension!"))?.to_string_lossy();
         if let Some(parser) = parse::PARSER_IMPLEMENTATIONS.get(ext.as_ref()) {
             let parseable = parser.parse(str)?;
-            for resource in parseable.resources {
-                resource.load(device, queue)?;
+            for (i, resource) in parseable.resources.into_iter().enumerate() {
+                resource.load(device, queue).map_err(|e|anyhow::anyhow!("Error loading resource #{}: {e}", i+1))?;
             }
+
+            let slides = parseable.slides.into_iter().enumerate()
+                .map(|(i, p)| {
+                    Slide::from_parseable(p).map_err(|e| anyhow::anyhow!("Error loading slide #{}: {e}", i+1))
+                }).chain([Ok(Slide::default())]).try_collect()?;
+
             Ok(Presentation {
-                slides: parseable.slides.into_iter().map(|p| Slide::from_parseable(p)).chain([Ok(Slide::default())]).try_collect()?,
+                slides,
                 current_slide: 0,
                 curr_slide_beginning: Instant::now(),
                 last_slide_beginning: Instant::now()
@@ -121,7 +126,10 @@ impl Slide {
                 };
                 drop(rend_type_prop);
 
-                let renderable = (renderable::RENDERABLES.get(rend_type.as_str()).ok_or(anyhow::anyhow!("No renderable of type '{rend_type}' exists!"))?)(p)?;
+                let renderable = (
+                        renderable::RENDERABLES.get(rend_type.as_str())
+                        .ok_or(anyhow::anyhow!("No renderable of type '{rend_type}' exists!"))?
+                    )(p).map_err(|e| anyhow::anyhow!("Error creating renderable of type '{rend_type}': {e}"))?;
 
                 Ok(RenderableWrapper::new_boxed(renderable))
             }).try_collect()?

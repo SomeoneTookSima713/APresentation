@@ -10,7 +10,7 @@ pub struct Color(pub palette::Srgba<f64>);
 
 impl<'lua> PropertyCompatible<'lua> for Color {
     const STRUCTURE: PropertyStructure = PropertyStructure::Or(&[
-        PropertyStructure::String(Some(r"#\d{6}\d{2}?")), // Standard Hex code #RRGGBB(AA)
+        PropertyStructure::String(Some(r"#\w{6}\w{2}?")), // Standard Hex code #RRGGBB(AA)
         PropertyStructure::Array(&[PropertyStructure::Number;3]), // RGB values in the range from 0 to 1
         PropertyStructure::Array(&[PropertyStructure::Number;4]), // RGBA values in the range from 0 to 1
         PropertyStructure::Dict(&[
@@ -46,9 +46,9 @@ impl<'lua> PropertyCompatible<'lua> for Color {
                 let mut components = [255_u8; 4];
                 let hexstr = str.split_at(1).1;
                 if hexstr.len()<6 {
-                    anyhow::bail!("Color hex string too short! (Expected at least six, got {} characters!)", hexstr.len());
+                    anyhow::bail!("Color hex string too short! (Expected at least 6 characters, got {}!)", hexstr.len());
                 } else if hexstr.len()%2 == 1 {
-                    anyhow::bail!("Color hex string incomplete! (Got uneven amount of number characters, which shouldn't happen!)");
+                    anyhow::bail!("Color hex string incomplete! (Got uneven amount of number characters, that shouldn't happen!)");
                 }
                 hex::decode_to_slice(hexstr, components.as_mut_slice())?;
                 Ok(Color(palette::cast::from_array::<palette::Srgba<f64>>(components.map(|u|u as f64 / 255.0))))

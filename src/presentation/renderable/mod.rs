@@ -120,10 +120,10 @@ impl Renderable for BaseProperties {
         };
 
         Ok(Self {
-            position: TypedProperty::new((get)("position")?)?,
-            color: TypedProperty::new((get)("color")?)?,
-            alignment: TypedProperty::new((get)("alignment")?)?,
-            z_index: TypedProperty::new((get)("z_index")?)?,
+            position: TypedProperty::new((get)("position")?).map_err(|e|anyhow::anyhow!("Error parsing property 'position': {e}"))?,
+            color: TypedProperty::new((get)("color")?).map_err(|e|anyhow::anyhow!("Error parsing property 'color': {e}"))?,
+            alignment: TypedProperty::new((get)("alignment")?).map_err(|e|anyhow::anyhow!("Error parsing property 'alignment': {e}"))?,
+            z_index: TypedProperty::new((get)("z_index")?).map_err(|e|anyhow::anyhow!("Error parsing property 'z_index': {e}"))?,
         })
     }
 

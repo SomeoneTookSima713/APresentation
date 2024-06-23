@@ -104,6 +104,7 @@ impl<'lua> PropertyCompatible<'lua> for Align1D {
 
 impl<'lua> PropertyCompatible<'lua> for Align2D {
     const STRUCTURE: PropertyStructure = PropertyStructure::Or(&[
+        PropertyStructure::String(Some("(TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)")),
         PropertyStructure::Array(&[PropertyStructure::Number;2]),
         PropertyStructure::Dict(&[("x", PropertyStructure::Number), ("y", PropertyStructure::Number)])
     ]);
@@ -123,6 +124,23 @@ impl<'lua> PropertyCompatible<'lua> for Align2D {
                     Align1D::convert_from(dict.borrow().get("y").ok_or(anyhow::anyhow!("Invalid Property!"))?.clone(), args.clone())?
                 )))
             },
+            PropertyValue::String(s) => {
+                Ok(match s.as_str() {
+                    "TOP_LEFT"   => Align2D::TOP_LEFT,
+                    "TOP_CENTER" => Align2D::TOP_CENTER,
+                    "TOP_RIGHT"  => Align2D::TOP_RIGHT,
+
+                    "MID_LEFT"   => Align2D::MID_LEFT,
+                    "MID_CENTER" => Align2D::MID_CENTER,
+                    "MID_RIGHT"  => Align2D::MID_RIGHT,
+
+                    "BOTTOM_LEFT"   => Align2D::BOTTOM_LEFT,
+                    "BOTTOM_CENTER" => Align2D::BOTTOM_CENTER,
+                    "BOTTOM_RIGHT"  => Align2D::BOTTOM_RIGHT,
+
+                    _ => unreachable!()
+                })
+            }
             _ => Err(anyhow::anyhow!("Invalid property!"))
         }
     }

@@ -88,25 +88,38 @@ impl PropertyStructure {
     /// string in the place of a number and this function would still return
     /// `true`, so you should still do additional checks on top of using this
     /// function.
-    pub fn check_structure<'lua>(&self, property: &Property<'lua>) -> anyhow::Result<bool> {
-        if let &Property::Eval(_) = property { return Ok(true); }
-        if let &Property::Constant(ref val) = property {
-            self.check_structure_of_value(val)
-        } else {
-            Ok(false)
+    pub fn check_structure<'lua>(&self, property: &Property<'lua>) -> anyhow::Result<Result<(), String>> {
+        match property {
+            Property::Eval(_) => Ok(Ok(())),
+            Property::Constant(ref val) => self.check_structure_of_value(val)
         }
     }
 
-    fn check_structure_of_value<'lua>(&self, value: &PropertyValue<'lua>) -> anyhow::Result<bool> {
+    pub fn to_string(&self) -> String {
+        match self {
+            PropertyStructure::Array(a) => format!("Array[ {} ]", a.iter().map(|s|s.to_string()).reduce(|acc,e| format!("{acc}, {e}")).unwrap()),
+            PropertyStructure::Bool => "Boolean".to_string(),
+            PropertyStructure::Dict(d) => format!("Dict{{ {} }}", d.iter().map(|(k,v)| format!("{k}: {}", v.to_string())).reduce(|acc,e| format!("{acc}, {e}")).unwrap()),
+            PropertyStructure::List(l) => format!("List[ {} ]", l.iter().map(|s|s.to_string()).reduce(|acc, e|format!("{acc} | {e}")).unwrap()),
+            PropertyStructure::Number => "Number".to_string(),
+            PropertyStructure::Or(o) => o.iter().map(|s| s.to_string()).reduce(|acc,e|format!("{acc} | {e}")).unwrap(),
+            PropertyStructure::String(s) => match s {
+                Some(r) => format!("String( /{r}/ )"),
+                None => "String".to_string()
+            }
+        }
+    }
+
+    fn check_structure_of_value<'lua>(&self, value: &PropertyValue<'lua>) -> anyhow::Result<Result<(), String>> {
         match (self, value) {
             (
                 PropertyStructure::Number,
                 &PropertyValue::Int(_) | PropertyValue::UInt(_) | PropertyValue::Float(_)
-            ) => Ok(true),
+            ) => Ok(Ok(())),
             (
                 PropertyStructure::String(None),
                 &PropertyValue::String(_)
-            ) => Ok(true),
+            ) => Ok(Ok(())),
             (
                 PropertyStructure::String(Some(regexp)),
                 &PropertyValue::String(ref str)
@@ -116,9 +129,9 @@ impl PropertyStructure {
                         if let Some(exp) = hm.get(*regexp) {
                             let mut iter = exp.find_iter(str.as_str());
                             if iter.next().is_some() && iter.next().is_none() {
-                                return Ok(true);
+                                return Ok(Ok(()));
                             } else {
-                                return Ok(false);
+                                return Ok(Err(format!("String '{str}' didn't match regexp: '{regexp}'")));
                             }
                         }
                     },
@@ -139,7 +152,10 @@ impl PropertyStructure {
                         let exactly_one_match = iter.next().is_some() && iter.next().is_none();
                         drop(iter);
                         hm.insert(regexp.to_string(), exp);
-                        return Ok(exactly_one_match);
+                        return Ok(match exactly_one_match {
+                            true => Ok(()),
+                            false => Err(format!("String '{str}' didn't match regexp: '{regexp}'"))
+                        });
                     },
                     Err(_) => {
                         log::warn!("RegExp Cache couldn't be written to!");
@@ -153,31 +169,70 @@ impl PropertyStructure {
                     }
                 };
                 let mut iter = exp.find_iter(str.as_str());
-                return Ok(iter.next().is_some() && iter.next().is_none());
+                return Ok(match iter.next().is_some() && iter.next().is_none() {
+                    true => Ok(()),
+                    false => Err(format!("String '{str}' didn't match regexp: '{regexp}'"))
+                });
             },
             (
                 PropertyStructure::Bool,
                 &PropertyValue::Bool(_)
-            ) => Ok(true),
+            ) => Ok(Ok(())),
             (
                 PropertyStructure::List(slist),
                 &PropertyValue::List(ref vlist)
-            ) => Ok(vlist.borrow().iter().try_all(|p| slist.iter().try_any(|s| s.check_structure(p)))?),
+            ) => {
+                for (i, p) in vlist.borrow().iter().enumerate() {
+                    if !slist.iter().try_any(|s| s.check_structure(p).map(|r|r.is_ok()))? {
+                        return Ok(Err(format!("Item at index {i} in list doesn't match allowed property structures")));
+                    }
+                }
+                Ok(Ok(()))
+            },
             (
                 PropertyStructure::Array(sarr),
                 &PropertyValue::List(ref vlist)
-            ) => Ok(sarr.iter().enumerate().try_all(|(i, s)| vlist.borrow().get(i).map(|p|s.check_structure(p)).unwrap_or(Ok(false)))?),
+            ) => {
+                let val = vlist.borrow();
+                for (i, s) in sarr.iter().enumerate() {
+                    if let Some(p) = val.get(i) {
+                        return Ok(s.check_structure(p)?.map_err(|e|format!("Item at index {i} of list has invalid property structure: {e}")))
+                    } else {
+                        return Ok(Err(format!("List has invalid length ({} expected but got {})", sarr.len(), val.len())))
+                    }
+                }
+                Ok(Ok(()))
+                // sarr.iter().enumerate().try_all(|(i, s)| vlist.borrow().get(i).map(|p|s.check_structure(p)).unwrap_or(Ok(false)))?
+            },
             (
                 PropertyStructure::Dict(sdict),
                 &PropertyValue::Dict(ref vdict)
-            ) => Ok(sdict.iter().try_all(|(k,v)| vdict.borrow().get(*k).map(|p| v.check_structure(p)).unwrap_or(Ok(false)))?),
+            ) => {
+                let val = vdict.borrow();
+                for (k,v) in sdict.iter() {
+                    if let Some(p) = val.get(*k) {
+                        return Ok(v.check_structure(p)?.map_err(|e|format!("Item at key '{k}' has invalid property structure: {e}")))
+                    } else {
+                        return Ok(Err(format!("Dict doesn't have required item at key '{k}'")))
+                    }
+                }
+                Ok(Ok(()))
+            },
             (
                 PropertyStructure::Or(spossib),
                 val
             ) => {
-                Ok(spossib.iter().try_any(|s| s.check_structure_of_value(val))?)
+                for s in spossib.iter() {
+                    if s.check_structure_of_value(val)?.is_ok() {
+                        return Ok(Ok(()))
+                    }
+                }
+                Ok(Err(format!("Property doesn't match possible property structures: Expected {}",self.to_string())))
             },
-            _ => Ok(false)
+            (structure, value) => Ok(Err(format!(
+                "Value doesn't match type of structure required: Expected {}",
+                structure.to_string()
+            )))
         }
     }
 }

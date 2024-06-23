@@ -119,6 +119,18 @@ impl EvaluatedPropertyValue {
                     }).try_collect()?)))
         })
     }
+
+    pub fn to_property<'lua>(&self) -> Property<'lua> {
+        Property::Constant(match self {
+            EvaluatedPropertyValue::Bool(b) => PropertyValue::Bool(*b),
+            EvaluatedPropertyValue::Dict(d) => PropertyValue::Dict(Rc::new(RefCell::new(d.borrow().iter().map(|(k,v)| (k.clone(), v.to_property())).collect()))),
+            EvaluatedPropertyValue::Float(f) => PropertyValue::Float(*f),
+            EvaluatedPropertyValue::Int(i) => PropertyValue::Int(*i),
+            EvaluatedPropertyValue::List(l) => PropertyValue::List(Rc::new(RefCell::new(l.borrow().iter().map(|v|v.to_property()).collect()))),
+            EvaluatedPropertyValue::String(s) => PropertyValue::String(s.clone()),
+            EvaluatedPropertyValue::UInt(u) => PropertyValue::UInt(*u)
+        })
+    }
 }
 
 impl<'a> From<mlua::Value<'a>> for Property<'a> {
@@ -340,9 +352,7 @@ impl<'lua, T> TypedProperty<'lua, T>
 where T: PropertyCompatible<'lua> {
     /// Creates a new [`TypedProperty`] from a regular [`Property`].
     pub fn new(base: Property<'lua>) -> anyhow::Result<Self> {
-        if !T::STRUCTURE.check_structure(&base)? {
-            anyhow::bail!("Incompatible property structure!");
-        }
+        T::STRUCTURE.check_structure(&base)?.map_err(|e|anyhow::anyhow!("{e}"))?;
 
         Ok(Self { prop: base, converted: RefCell::new(None) })
     }

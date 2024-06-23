@@ -116,7 +116,7 @@ impl PresentationState {
         });
 
         if let Some(presentation) = self.loaded_presentation.as_mut() {
-            let args = todo!();
+            let args = mlua::Variadic::new();
             presentation.render(&mut self.rendering_managers, args)?;
 
             for (typeid, manager) in self.rendering_managers.iter_mut() {

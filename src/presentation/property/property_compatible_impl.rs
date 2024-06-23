@@ -345,3 +345,91 @@ impl<'lua, T: PropertyCompatible<'lua>> PropertyCompatible<'lua> for Vec<T> {
         Property::Constant(PropertyValue::List(Rc::new(RefCell::new(self.into_iter().map(|v|v.move_into()).collect()))))
     }
 }
+
+impl<'lua> PropertyCompatible<'lua> for crate::texture::TextureSamplerSelection {
+    const STRUCTURE: PropertyStructure = PropertyStructure::String(Some("linear|Linear|nearest_neighbor|NearestNeighbor|nearest_neighbour|NearestNeighbour|pixel_perfect|PixelPerfect"));
+
+    fn convert_from<A: mlua::IntoLuaMulti<'lua> + Clone>(value: Property<'lua>, args: A) -> anyhow::Result<Self>
+    where Self: Sized {
+        use crate::texture::TextureSamplerSelection;
+        match value.get_recursively(args)? {
+            EvaluatedPropertyValue::String(s) => {
+                match s.replace("_", "").to_lowercase().as_str() {
+                    "linear" => Ok(TextureSamplerSelection::Linear),
+                    "nearestneighbor"|"nearestneighbour"|"pixelperfect" => Ok(TextureSamplerSelection::PixelPerfect),
+                    _ => anyhow::bail!("Invalid TextureSamplerSelection! (Expected String)")
+                }
+            },
+            _ => anyhow::bail!("Invalid TextureSamplerSelection! (Expected String)")
+        }
+    }
+
+    fn convert_into(&'lua self) -> Property<'lua> {
+        use crate::texture::TextureSamplerSelection;
+        Property::Constant(PropertyValue::String(Rc::new(match self {
+            TextureSamplerSelection::Linear => "linear",
+            TextureSamplerSelection::PixelPerfect => "pixel_perfect"
+        }.to_owned())))
+    }
+
+    fn move_into(self) -> Property<'lua>
+    where Self: Sized {
+        use crate::texture::TextureSamplerSelection;
+        Property::Constant(PropertyValue::String(Rc::new(match self {
+            TextureSamplerSelection::Linear => "linear",
+            TextureSamplerSelection::PixelPerfect => "pixel_perfect"
+        }.to_owned())))
+    }
+}
+
+impl<'lua> PropertyCompatible<'lua> for crate::util::math::Rect {
+    const STRUCTURE: PropertyStructure = PropertyStructure::Array(&[PropertyStructure::Number;4]);
+
+    fn convert_from<A: mlua::IntoLuaMulti<'lua> + Clone>(value: Property<'lua>, args: A) -> anyhow::Result<Self>
+        where Self: Sized {
+        match value.get_recursively(args)? {
+            EvaluatedPropertyValue::List(l) => {
+                let list = l.borrow();
+                if let Some(&[ref x, ref y, ref w, ref h]) = list.get(0..4) {
+                    let ex = match x {
+                        EvaluatedPropertyValue::Float(f) => *f as f32,
+                        EvaluatedPropertyValue::Int(i) => *i as f32,
+                        EvaluatedPropertyValue::UInt(u) => *u as f32,
+                        _ => anyhow::bail!("Item in list wasn't a number!")
+                    };
+                    let ey = match y {
+                        EvaluatedPropertyValue::Float(f) => *f as f32,
+                        EvaluatedPropertyValue::Int(i) => *i as f32,
+                        EvaluatedPropertyValue::UInt(u) => *u as f32,
+                        _ => anyhow::bail!("Item in list wasn't a number!")
+                    };
+                    let ew = match w {
+                        EvaluatedPropertyValue::Float(f) => *f as f32,
+                        EvaluatedPropertyValue::Int(i) => *i as f32,
+                        EvaluatedPropertyValue::UInt(u) => *u as f32,
+                        _ => anyhow::bail!("Item in list wasn't a number!")
+                    };
+                    let eh = match h {
+                        EvaluatedPropertyValue::Float(f) => *f as f32,
+                        EvaluatedPropertyValue::Int(i) => *i as f32,
+                        EvaluatedPropertyValue::UInt(u) => *u as f32,
+                        _ => anyhow::bail!("Item in list wasn't a number!")
+                    };
+                    Ok(Self::new_vals(ex, ey, ew, eh))
+                } else {
+                    anyhow::bail!("Not enough items in list")
+                }
+            },
+            _ => anyhow::bail!("Invalid Property!")
+        }
+    }
+
+    fn convert_into(&'lua self) -> Property<'lua> {
+        Property::Constant(PropertyValue::List(Rc::new(RefCell::new(vec![self.x(),self.y(),self.w(),self.h()].into_iter().map(|n|Property::Constant(PropertyValue::Float(n as f64))).collect()))))
+    }
+
+    fn move_into(self) -> Property<'lua>
+    where Self: Sized {
+        Property::Constant(PropertyValue::List(Rc::new(RefCell::new(vec![self.x(),self.y(),self.w(),self.h()].into_iter().map(|n|Property::Constant(PropertyValue::Float(n as f64))).collect()))))
+    }
+}

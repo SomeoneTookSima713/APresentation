@@ -5,6 +5,7 @@ pub mod fallible_app_handler;
 pub mod hashmap_ext;
 pub mod lua_helper;
 pub mod debug_state;
+pub mod math;
 
 pub use hashable_value::*;
 

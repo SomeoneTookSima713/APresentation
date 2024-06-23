@@ -5,35 +5,34 @@ use std::sync::Arc;
 use wgpu::{ RenderPipeline, RenderPipelineDescriptor, PipelineLayoutDescriptor };
 
 use super::{ Renderable, RenderableRenderingManager, RenderableRenderingManagerObjectSafe, ParseableRenderable, BaseProperties, extended_structure };
-use crate::presentation::property::{ PropertyStructure, TypedProperty, Property, PropertyCompatible, PropertyValue };
+use crate::presentation::property::{ PropertyStructure, TypedProperty, Property, PropertyCompatible, PropertyValue, common_properties as properties };
 use crate::presentation::resource_managers;
 use crate::shaders::rect as shader;
 use crate::render::texture;
-use crate::util::hashmap_ext::HashMapExt;
+use crate::util::{ hashmap_ext::HashMapExt, math };
 
 pub struct Rectangle<'lua> {
     base_properties: BaseProperties,
     size: TypedProperty<'lua, (f64, f64)>,
     corner_rounding: TypedProperty<'lua, f64>,
-    texture: RectangleTextureType,
+    texture: RectangleTextureType<'lua>,
 }
 
 impl<'lua> Rectangle<'lua> {
-    pub fn new(base_properties: BaseProperties, size: TypedProperty<'lua, (f64, f64)>, corner_rounding: TypedProperty<'lua, f64>, texture: RectangleTextureType) -> Self {
+    pub fn new(base_properties: BaseProperties, size: TypedProperty<'lua, (f64, f64)>, corner_rounding: TypedProperty<'lua, f64>, texture: RectangleTextureType<'lua>) -> Self {
         Rectangle { base_properties, size, corner_rounding, texture }
     }
 }
 
-pub enum RectangleTextureType {
+pub enum RectangleTextureType<'lua> {
     White,
-    Custom(Rc<String>)
+    Custom(properties::Image<'lua>)
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct RectangleVertex {
     position: [f32;2],
-    tex_coords: [f32;2],
 }
 
 impl RectangleVertex {
@@ -45,20 +44,15 @@ impl RectangleVertex {
                 offset: 0,
                 shader_location: 0,
                 format: wgpu::VertexFormat::Float32x2,
-            },
-            wgpu::VertexAttribute {
-                offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
-                shader_location: 1,
-                format: wgpu::VertexFormat::Float32x2,
             }
         ]
     };
 
     pub const VERTICES: &'static [Self] = &[
-        Self { position: [-0.5, -0.5], tex_coords: [0.0, 1.0] },
-        Self { position: [ 0.5, -0.5], tex_coords: [1.0, 1.0] },
-        Self { position: [ 0.5,  0.5], tex_coords: [1.0, 0.0] },
-        Self { position: [-0.5,  0.5], tex_coords: [0.0, 0.0] },
+        Self { position: [-0.5, -0.5] },
+        Self { position: [ 0.5, -0.5] },
+        Self { position: [ 0.5,  0.5] },
+        Self { position: [-0.5,  0.5] },
     ];
 
     pub const INDICES: &'static [u16] = &[
@@ -73,6 +67,7 @@ struct RectangleInstance {
     pub position: [f32;3],
     pub size: [f32;2],
     pub color: [f32;4],
+    pub uv: [f32; 4],
     pub corner_rounding: f32,
 }
 
@@ -83,21 +78,26 @@ impl RectangleInstance {
         attributes: &[
             wgpu::VertexAttribute {
                 offset: 0,
-                shader_location: 2,
+                shader_location: 1,
                 format: wgpu::VertexFormat::Float32x3,
             },
             wgpu::VertexAttribute {
                 offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                shader_location: 3,
+                shader_location: 2,
                 format: wgpu::VertexFormat::Float32x2,
             },
             wgpu::VertexAttribute {
                 offset: std::mem::size_of::<[f32; 5]>() as wgpu::BufferAddress,
-                shader_location: 4,
+                shader_location: 3,
                 format: wgpu::VertexFormat::Float32x4,
             },
             wgpu::VertexAttribute {
                 offset: std::mem::size_of::<[f32; 9]>() as wgpu::BufferAddress,
+                shader_location: 4,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::size_of::<[f32; 13]>() as wgpu::BufferAddress,
                 shader_location: 5,
                 format: wgpu::VertexFormat::Float32,
             }
@@ -212,8 +212,6 @@ impl RenderableRenderingManager for RectangleRenderer {
             }));
         }
 
-        // log::debug!("{:#?}", self.instances);
-
         encoder.set_bind_group(1, &camera.get_bind_group(), &[]);
 
         for texture_path in self.instances.keys() {
@@ -240,21 +238,22 @@ impl RenderableRenderingManager for RectangleRenderer {
         let color = instance.base_properties.color.get(args.clone())?;
         let corner_rounding = instance.corner_rounding.get(args.clone())?;
 
-        let texture_path = match &instance.texture {
-            RectangleTextureType::White => "DEFAULT",
-            RectangleTextureType::Custom(ref p) => p
+        let image = match &instance.texture {
+            RectangleTextureType::White => properties::Image::new_constant(Rc::new("DEFAULT".to_string()), (0.0,0.0,1.0,1.0), texture::TextureSamplerSelection::PixelPerfect),
+            RectangleTextureType::Custom(ref p) => p.clone()
         };
 
-        self.instances.create_if_none(texture_path.to_string(), Vec::new);
+        self.instances.create_if_none(image.source().to_string(), Vec::new);
 
-        self.instance_textures.try_create_if_none(texture_path.to_string(), || {
-            resource_managers::TEXTURE_MANAGER.get(texture_path).ok_or(anyhow::anyhow!("Couldn't find texture for rectangle!"))
+        self.instance_textures.try_create_if_none(image.source().to_string(), || {
+            resource_managers::TEXTURE_MANAGER.get(image.source()).ok_or(anyhow::anyhow!("Couldn't find texture for rectangle!"))
         })?;
 
-        self.instances.get_mut(texture_path).unwrap().push(RectangleInstance {
+        self.instances.get_mut(image.source()).unwrap().push(RectangleInstance {
             position: [pos.0 as f32, pos.1 as f32, *z as f32],
             size: [size.0 as f32, size.1 as f32],
             color: (*color).into(),
+            uv: (*image.rect().get(args.clone())?).into(),
             corner_rounding: *corner_rounding as f32,
         });
         Ok(())
@@ -269,28 +268,51 @@ impl Renderable for Rectangle<'static> {
 
     fn from_parseable(parseable: ParseableRenderable<'static>) -> anyhow::Result<Self>
     where Self: Sized {
-        let size = TypedProperty::new(parseable.get("size").ok_or(anyhow::anyhow!("Invalid Property!"))?.clone())?;
-        let corner_rounding = TypedProperty::new(parseable.get("corner_rounding").ok_or(anyhow::anyhow!("Invalid Property!"))?.clone())?;
-        let texture_string: Option<Rc<String>>;
-        match parseable.get("texture") {
-            Some(r) => {
+        let size = TypedProperty::new(parseable.get("size").ok_or(anyhow::anyhow!("Property 'size' missing!"))?.clone()).map_err(|e| anyhow::anyhow!("Error parsing property 'size': {e}"))?;
+        let corner_rounding = TypedProperty::new(parseable.get("corner_rounding").ok_or(anyhow::anyhow!("Property 'corner_rounding' missing!"))?.clone()).map_err(|e| anyhow::anyhow!("Error parsing property 'corner_rounding': {e}"))?;
+        let texture = match parseable.get("texture") {
+            Some(r) => RectangleTextureType::Custom(
                 match &*r {
-                    &Property::Constant(PropertyValue::String(ref s)) => { texture_string = Some(s.clone()); },
-                    &Property::Eval(_) => {
-                        log::warn!("The `texture` property of a Rectangle cannot be an expression! Defaulting to color only.");
-                        texture_string = None;
+                    &Property::Constant(PropertyValue::String(ref s)) => {
+                        properties::Image::new_constant(s.clone(), [0.0,0.0,1.0,1.0], texture::TextureSamplerSelection::Linear)
                     },
-                    _ => {
-                        texture_string = None;
+                    &Property::Constant(PropertyValue::Dict(ref d)) => {
+                        let dict = d.borrow();
+                        let source = match dict.get("source").ok_or(anyhow::anyhow!("Required Field 'source' of Property 'texture' is missing!"))? {
+                            Property::Constant(PropertyValue::String(s)) => s.clone(),
+                            Property::Constant(_) => anyhow::bail!("Field 'source' of Property 'texture' has wrong type! (Expected String)"),
+                            Property::Eval(_) => anyhow::bail!("Field 'source' of Property 'texture' cannot be an expression!")
+                        };
+                        let rect = if let Some(r) = dict.get("rect") {
+                            TypedProperty::new(r.clone())
+                        } else {
+                            TypedProperty::new(math::Rect::new_vals(0.0, 0.0, 1.0, 1.0).move_into())
+                        }?;
+                        let sampler = if let Some(s) = dict.get("sampler") {
+                            match s {
+                                Property::Constant(PropertyValue::String(ref str)) => {
+                                    match str.replace("_", "").to_lowercase().as_str() {
+                                        "linear" => texture::TextureSamplerSelection::Linear,
+                                        "pixelperfect"|"nearestneighbor"|"nearestneighbour" => texture::TextureSamplerSelection::PixelPerfect,
+                                        _ => anyhow::bail!("Field 'sampler' of Property 'texture' has invalid value! (Expected \"linear\" or any of \"pixel_perfect\", \"nearest_neighbor\", \"nearest_neighbour\" but got \"{str}\")")
+                                    }
+                                },
+                                Property::Constant(_) => anyhow::bail!("Field 'sampler' of Property 'texture' has wrong type! (Expected String)"),
+                                Property::Eval(_) => anyhow::bail!("Field 'sampler' of Property 'texture' cannot be an expression!")
+                            }
+                        } else {
+                            texture::TextureSamplerSelection::Linear
+                        };
+                        properties::Image::new(source, rect, sampler)
                     }
+                    &Property::Constant(_) => {
+                        anyhow::bail!("Property 'texture' has invalid type! (Expected String or {{ source: String, rect?: [Number; 4], sampler?: \"linear\" | \"pixel_perfect\" }})")
+                    },
+                    &Property::Eval(_) => {
+                        anyhow::bail!("Property 'texture' cannot be an expression!");
+                    },
                 }
-            }
-            None => {
-                texture_string = None;
-            }
-        }
-        let texture = match texture_string {
-            Some(s) => RectangleTextureType::Custom(s),
+            ),
             None => RectangleTextureType::White
         };
         Ok(Self {

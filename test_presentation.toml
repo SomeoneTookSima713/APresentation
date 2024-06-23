@@ -23,11 +23,13 @@ lua-expr-type = "eval"
     [[slide.element]]
     # Singular slide element
     type = "Rect"
-    position = [ 0,0 ]
+    position = [ 250.0, 250.0 ]
     # Alignment is a special property: It either matches against a predefined
     # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
     # a list of two numbers.
     alignment = "MID_CENTER"
     color = "#808080ff"
-    corner_rounding = 0.75
-    texture = "DEFAULT"
+    corner_rounding = 0.6
+    size = [500,500]
+    texture = { source = "test", rect = "LUA#{0,0,1,1}", sampler = "pixel_perfect" }
+    z_index = 1
