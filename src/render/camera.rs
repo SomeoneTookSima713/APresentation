@@ -24,8 +24,8 @@ pub fn init(device: &wgpu::Device) -> anyhow::Result<()> {
 }
 
 pub struct Camera {
-    width: f32,
-    height: f32,
+    pub width: f32,
+    pub height: f32,
     znear: f32,
     zfar: f32,
     uniform: CameraUniform,

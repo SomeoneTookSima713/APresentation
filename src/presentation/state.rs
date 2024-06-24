@@ -9,15 +9,13 @@ use crate::render::{ self, post_process };
 use super::renderable::{ RenderableRenderingManagerObjectSafe, register_rendering_managers };
 use super::Presentation;
 
-static LUA_STATE: OnceLock<Mutex<Lua>> = OnceLock::new();
-
 /// The state used for presentation-related stuff.
 /// 
 /// Only one instance of this can exist at a time, as it borrows a private
 /// static variable mutably.
 pub struct PresentationState {
     /// The lua state
-    lua: MutexGuard<'static, Lua>,
+    lua: &'static Lua,
 
     pub loaded_presentation: Option<Presentation>,
 
@@ -32,20 +30,7 @@ pub struct PresentationState {
 
 impl PresentationState {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, window_size: winit::dpi::PhysicalSize<u32>, config: &wgpu::SurfaceConfiguration) -> anyhow::Result<Self> {
-        let lua;
-        match LUA_STATE.get() {
-            Some(m) => {
-                match m.try_lock() {
-                    Ok(g) => lua = g,
-                    Err(std::sync::TryLockError::Poisoned(e)) => anyhow::bail!("A previously created PresentationState poisoned the Lua instance: {e}"),
-                    Err(std::sync::TryLockError::WouldBlock) => anyhow::bail!("An instance of PresentationState already exists!")
-                }
-            },
-            None => {
-                LUA_STATE.set(Mutex::new(Lua::new()));
-                lua = LUA_STATE.get().unwrap().lock().map_err(|e|anyhow::anyhow!("Another thread intervened while this PresentationState was being created: {e}"))?;
-            }
-        }
+        let lua = Box::leak(Box::new(Lua::new()));
         let post_process_pass = post_process::PostProcessPipeline::new(device, window_size, config)?;
 
         let camera = render::camera::Camera::new(window_size.width as f32, window_size.height as f32, 0.0, 10000.0, device)?;
@@ -56,7 +41,7 @@ impl PresentationState {
 
         Ok(Self {
             lua,
-            loaded_presentation: Some(Presentation::load_file("test_presentation.toml", device, queue)?),
+            loaded_presentation: Some(Presentation::load_file("test_presentation.toml", device, queue, lua)?),
             post_process_pass,
             camera,
             rendering_managers,
@@ -77,7 +62,7 @@ impl PresentationState {
         self.last_time = Instant::now();
 
         if let Some(presentation) = self.loaded_presentation.as_mut() {
-            presentation.update(&self.lua, dt.as_secs_f64());
+            presentation.update(self.lua, dt.as_secs_f64());
         }
     }
 
@@ -116,7 +101,10 @@ impl PresentationState {
         });
 
         if let Some(presentation) = self.loaded_presentation.as_mut() {
-            let args = mlua::Variadic::new();
+            let mut args = mlua::Variadic::new();
+            args.push(mlua::Value::Number(presentation.curr_slide_beginning.elapsed().as_secs_f64()));
+            args.push(mlua::Value::Number(self.camera.width as f64));
+            args.push(mlua::Value::Number(self.camera.height as f64));
             presentation.render(&mut self.rendering_managers, args)?;
 
             for (typeid, manager) in self.rendering_managers.iter_mut() {

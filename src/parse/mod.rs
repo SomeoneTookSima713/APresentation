@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use once_cell::sync::Lazy;
 
-use crate::presentation::property::{ Property, PropertyValue };
+use crate::presentation::property::{ Property, PropertyValue, PropertyEnvironment };
 
 pub mod resource;
 
@@ -63,17 +63,17 @@ pub struct ParseableSlide {
 pub trait PresentationParser: Send + Sync {
     const FILE_EXTENSION: &'static str;
 
-    fn parse(file: String) -> anyhow::Result<ParseablePresentation>;
+    fn parse(file: String, lua: &'static mlua::Lua, env: &PropertyEnvironment) -> anyhow::Result<ParseablePresentation>;
 }
 
 pub trait PresentationParserObjectSafe: Send + Sync {
     fn get_file_extension(&self) -> &'static str;
 
-    fn parse(&self, file: String) -> anyhow::Result<ParseablePresentation>;
+    fn parse(&self, file: String, lua: &'static mlua::Lua, env: &PropertyEnvironment) -> anyhow::Result<ParseablePresentation>;
 }
 
 impl<T: PresentationParser> PresentationParserObjectSafe for T {
     fn get_file_extension(&self) -> &'static str { Self::FILE_EXTENSION }
 
-    fn parse(&self, file: String) -> anyhow::Result<ParseablePresentation> { <Self as PresentationParser>::parse(file) }
+    fn parse(&self, file: String, lua: &'static mlua::Lua, env: &PropertyEnvironment) -> anyhow::Result<ParseablePresentation> { <Self as PresentationParser>::parse(file, lua, env) }
 }

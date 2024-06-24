@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{ Mutex, MutexGuard };
 use std::rc::Rc;
 
 use once_cell::sync::Lazy;
@@ -231,8 +231,11 @@ impl<'a> Property<'a> {
 
     /// Converts any lua code block (in string form) into a [`Property`], the
     /// code block's return value being the value of the property.
-    pub fn from_lua_string<S: AsRef<String>>(lua: &'static mlua::Lua, string: S, env: PropertyEnvironment) -> anyhow::Result<Self> {
-        let func = lua.load(string.as_ref()).set_environment((*env).clone()).into_function()?;
+    pub fn from_lua_string<S: std::borrow::Borrow<String>>(lua: &'static mlua::Lua, string: S, env: PropertyEnvironment) -> anyhow::Result<Self> {
+        const LUA_SNIPPET_APPEND: &str = "local t,w,h = ... ";
+
+        log::debug!("Loading Lua-Snippet: {}", string.borrow());
+        let func = lua.load(format!("{LUA_SNIPPET_APPEND}{}",string.borrow())).set_environment((*env).clone()).into_function()?;
 
         Ok(Self::Eval(func))
     }
@@ -324,6 +327,9 @@ pub fn get_environment(lua: &'static mlua::Lua) -> anyhow::Result<PropertyEnviro
 
     // Lua Env
     hm.insert("math", PropEnvVal::Table(math));
+
+    hm.insert("print", PropEnvVal::Function(lua.create_function(|_, args: mlua::Variadic<mlua::Value>| { log::info!("Lua printed: {args:?}"); Ok(()) })?));
+
     Ok(PropertyEnvironment(hm))
 }
 

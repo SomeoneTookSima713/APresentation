@@ -17,6 +17,7 @@ pub struct Presentation {
     current_slide: usize,
     curr_slide_beginning: Instant,
     last_slide_beginning: Instant,
+    property_environment: property::PropertyEnvironment
 }
 
 pub struct Slide {
@@ -28,25 +29,29 @@ struct RenderableWrapper {
 }
 
 impl Presentation {
-    pub fn new() -> Self {
+    pub fn new(lua: &'static mlua::Lua) -> anyhow::Result<Self> {
         let mut slides = Vec::new();
         slides.push(Slide::default());
 
-        Self {
+        Ok(Self {
             slides,
             current_slide: 0,
             curr_slide_beginning: Instant::now(),
-            last_slide_beginning: Instant::now()
-        }
+            last_slide_beginning: Instant::now(),
+            property_environment: property::get_environment(lua)?
+        })
     }
 
-    pub fn load_file<P: AsRef<Path>>(path: P, device: &wgpu::Device, queue: &wgpu::Queue) -> anyhow::Result<Self> {
+    pub fn load_file<P: AsRef<Path>>(path: P, device: &wgpu::Device, queue: &wgpu::Queue, lua: &'static mlua::Lua) -> anyhow::Result<Self> {
         use std::fs;
 
         let str = fs::read_to_string(path.as_ref())?;
         let ext = path.as_ref().extension().ok_or(anyhow::anyhow!("Couldn't determine the presentation's file extension!"))?.to_string_lossy();
+
+        let property_environment = property::get_environment(lua)?;
+
         if let Some(parser) = parse::PARSER_IMPLEMENTATIONS.get(ext.as_ref()) {
-            let parseable = parser.parse(str)?;
+            let parseable = parser.parse(str, lua, &property_environment)?;
             for (i, resource) in parseable.resources.into_iter().enumerate() {
                 resource.load(device, queue).map_err(|e|anyhow::anyhow!("Error loading resource #{}: {e}", i+1))?;
             }
@@ -60,7 +65,8 @@ impl Presentation {
                 slides,
                 current_slide: 0,
                 curr_slide_beginning: Instant::now(),
-                last_slide_beginning: Instant::now()
+                last_slide_beginning: Instant::now(),
+                property_environment
             })
         } else {
             anyhow::bail!("Couldn't find a suitable parsing implementation for given file! Parsing implementations are available for the following file types: {}",
@@ -85,7 +91,7 @@ impl Presentation {
         self.curr_slide_beginning = Instant::now();
     }
 
-    pub fn update(&mut self, lua: &MutexGuard<'static, mlua::Lua>, dt: f64) -> anyhow::Result<()> {
+    pub fn update(&mut self, lua: &'static mlua::Lua, dt: f64) -> anyhow::Result<()> {
         if let Some(slide) = self.slides.get_mut(self.current_slide) {
             slide.update(lua, dt)
         } else {
@@ -136,7 +142,7 @@ impl Slide {
         })
     }
 
-    pub fn update(&mut self, lua: &MutexGuard<'static, mlua::Lua>, dt: f64) -> anyhow::Result<()> {
+    pub fn update(&mut self, lua: &'static mlua::Lua, dt: f64) -> anyhow::Result<()> {
         for renderable in self.renderables.iter() {
             renderable.update(lua, dt)?;
         }
@@ -173,7 +179,7 @@ impl RenderableWrapper {
         Self { renderable }
     }
 
-    pub fn update(&self, lua: &MutexGuard<'static, mlua::Lua>, dt: f64) -> anyhow::Result<()> {
+    pub fn update(&self, lua: &'static mlua::Lua, dt: f64) -> anyhow::Result<()> {
         self.renderable.begin_new_frame()
     }
 

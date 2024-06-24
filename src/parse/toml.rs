@@ -2,20 +2,24 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::presentation::property::{ Property, PropertyValue, EvaluatedPropertyValue };
+use crate::presentation::property::{ Property, PropertyValue, EvaluatedPropertyValue, PropertyEnvironment };
 use super::{ ParseablePresentation, ParseableSlide, ParseableRenderable, PresentationParser, resource };
 
 use toml::Table;
 
-fn value_to_property(val: toml::Value) -> Property<'static> {
-    Property::Constant(match val {
-        toml::Value::Array(v) => PropertyValue::List(Rc::new(RefCell::new(v.into_iter().map(|v| value_to_property(v)).collect::<Vec<_>>()))),
-        toml::Value::Boolean(b) => PropertyValue::Bool(b),
+fn value_to_property(val: toml::Value, lua: &'static mlua::Lua, env: &PropertyEnvironment) -> anyhow::Result<Property<'static>> {
+    Ok(match val {
+        toml::Value::Array(v) => Property::Constant(PropertyValue::List(Rc::new(RefCell::new(v.into_iter().map(|v| value_to_property(v, lua, env)).try_collect::<Vec<_>>()?)))),
+        toml::Value::Boolean(b) => Property::Constant(PropertyValue::Bool(b)),
         toml::Value::Datetime(_) => panic!("Dates aren't supported!"),
-        toml::Value::Float(f) => PropertyValue::Float(f),
-        toml::Value::Integer(i) => PropertyValue::Int(i),
-        toml::Value::String(s) => PropertyValue::String(Rc::new(s)),
-        toml::Value::Table(t) => PropertyValue::Dict(Rc::new(RefCell::new(t.into_iter().map(|(k, v)| (k, value_to_property(v))).collect::<HashMap<_,_>>()))),
+        toml::Value::Float(f) => Property::Constant(PropertyValue::Float(f)),
+        toml::Value::Integer(i) => Property::Constant(PropertyValue::Int(i)),
+        toml::Value::String(s) => if s.starts_with("LUA#") {
+            Property::from_lua_string(lua, s.replacen("LUA#", "", 1), env.clone())?
+        } else {
+            Property::Constant(PropertyValue::String(Rc::new(s)))
+        },
+        toml::Value::Table(t) => Property::Constant(PropertyValue::Dict(Rc::new(RefCell::new(t.into_iter().map(|(k, v)| Ok::<_, anyhow::Error>((k, value_to_property(v, lua, env)?))).try_collect::<HashMap<_,_>>()?)))),
     })
 }
 
@@ -36,7 +40,7 @@ pub struct TomlParser;
 impl PresentationParser for TomlParser {
     const FILE_EXTENSION: &'static str = "toml";
 
-    fn parse(file: String) -> anyhow::Result<ParseablePresentation> {
+    fn parse(file: String, lua: &'static mlua::Lua, env: &PropertyEnvironment) -> anyhow::Result<ParseablePresentation> {
         let file: Table = file.parse()?;
 
         let slides = file
@@ -52,7 +56,7 @@ impl PresentationParser for TomlParser {
 
                 let renderables = elements.into_iter().enumerate().map(|(ie, elem)| {
                     if let toml::Value::Table(map) = elem {
-                        Ok(ParseableRenderable::new(Rc::new(RefCell::new(map.into_iter().map(|(k,v)| (k,value_to_property(v))).collect::<HashMap<String, Property<'static>>>()))))
+                        Ok(ParseableRenderable::new(Rc::new(RefCell::new(map.into_iter().map(|(k,v)| Ok::<_, anyhow::Error>((k,value_to_property(v, lua, env)?))).try_collect::<HashMap<String, Property<'static>>>()?))))
                     } else {
                         anyhow::bail!("Element #{} of slide #{} isn't a table!", ie+1, i+1)
                     }

@@ -9,7 +9,7 @@
 #              local x = math.min(scr.w, scr.h)
 #              return 0.2 * x
 #              """
-lua-expr-type = "eval"
+lua-expr-type = "function"
 
 [[resource]]
     type = "Image"
@@ -30,6 +30,6 @@ lua-expr-type = "eval"
     alignment = "MID_CENTER"
     color = "#808080ff"
     corner_rounding = 0.6
-    size = [500,500]
-    texture = { source = "test", rect = "LUA#{0,0,1,1}", sampler = "pixel_perfect" }
+    size = ["LUA#return w*0.5",500]
+    texture = { source = "test", rect = [0,0,1,1], sampler = "pixel_perfect" }
     z_index = 1
