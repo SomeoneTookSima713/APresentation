@@ -12,12 +12,30 @@ use std::time::Instant;
 use renderable::{ RenderableRenderingManagerObjectSafe, RenderableObjectSafe };
 use crate::parse;
 
+pub mod config {
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub enum LuaExprType {
+        Function,
+        Eval
+    }
+
+    impl Default for LuaExprType {
+        fn default() -> Self { Self::Eval }
+    }
+
+    #[derive(Default)]
+    pub struct PresentationConfig {
+        pub lua_expression_type: LuaExprType
+    }
+}
+
 pub struct Presentation {
     slides: Vec<Slide>,
     current_slide: usize,
     curr_slide_beginning: Instant,
     last_slide_beginning: Instant,
-    property_environment: property::PropertyEnvironment
+    property_environment: property::PropertyEnvironment,
+    config: config::PresentationConfig,
 }
 
 pub struct Slide {
@@ -38,7 +56,8 @@ impl Presentation {
             current_slide: 0,
             curr_slide_beginning: Instant::now(),
             last_slide_beginning: Instant::now(),
-            property_environment: property::get_environment(lua)?
+            property_environment: property::get_environment(lua)?,
+            config: config::PresentationConfig::default()
         })
     }
 
@@ -66,7 +85,8 @@ impl Presentation {
                 current_slide: 0,
                 curr_slide_beginning: Instant::now(),
                 last_slide_beginning: Instant::now(),
-                property_environment
+                property_environment,
+                config: parseable.config
             })
         } else {
             anyhow::bail!("Couldn't find a suitable parsing implementation for given file! Parsing implementations are available for the following file types: {}",

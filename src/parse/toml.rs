@@ -3,23 +3,24 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::presentation::property::{ Property, PropertyValue, EvaluatedPropertyValue, PropertyEnvironment };
+use crate::presentation::config;
 use super::{ ParseablePresentation, ParseableSlide, ParseableRenderable, PresentationParser, resource };
 
 use toml::Table;
 
-fn value_to_property(val: toml::Value, lua: &'static mlua::Lua, env: &PropertyEnvironment) -> anyhow::Result<Property<'static>> {
+fn value_to_property(val: toml::Value, lua: &'static mlua::Lua, env: &PropertyEnvironment, lua_expr_type: config::LuaExprType) -> anyhow::Result<Property<'static>> {
     Ok(match val {
-        toml::Value::Array(v) => Property::Constant(PropertyValue::List(Rc::new(RefCell::new(v.into_iter().map(|v| value_to_property(v, lua, env)).try_collect::<Vec<_>>()?)))),
+        toml::Value::Array(v) => Property::Constant(PropertyValue::List(Rc::new(RefCell::new(v.into_iter().map(|v| value_to_property(v, lua, env, lua_expr_type)).try_collect::<Vec<_>>()?)))),
         toml::Value::Boolean(b) => Property::Constant(PropertyValue::Bool(b)),
         toml::Value::Datetime(_) => panic!("Dates aren't supported!"),
         toml::Value::Float(f) => Property::Constant(PropertyValue::Float(f)),
         toml::Value::Integer(i) => Property::Constant(PropertyValue::Int(i)),
         toml::Value::String(s) => if s.starts_with("LUA#") {
-            Property::from_lua_string(lua, s.replacen("LUA#", "", 1), env.clone())?
+            Property::from_lua_string(lua, s.replacen("LUA#", "", 1), env.clone(), lua_expr_type)?
         } else {
             Property::Constant(PropertyValue::String(Rc::new(s)))
         },
-        toml::Value::Table(t) => Property::Constant(PropertyValue::Dict(Rc::new(RefCell::new(t.into_iter().map(|(k, v)| Ok::<_, anyhow::Error>((k, value_to_property(v, lua, env)?))).try_collect::<HashMap<_,_>>()?)))),
+        toml::Value::Table(t) => Property::Constant(PropertyValue::Dict(Rc::new(RefCell::new(t.into_iter().map(|(k, v)| Ok::<_, anyhow::Error>((k, value_to_property(v, lua, env, lua_expr_type)?))).try_collect::<HashMap<_,_>>()?)))),
     })
 }
 
@@ -43,6 +44,25 @@ impl PresentationParser for TomlParser {
     fn parse(file: String, lua: &'static mlua::Lua, env: &PropertyEnvironment) -> anyhow::Result<ParseablePresentation> {
         let file: Table = file.parse()?;
 
+        let config = {
+            let lua_expression_type = if let Some(val) = file.get("lua_expr_type") {
+                match val {
+                    toml::Value::String(ref s) => match s.to_lowercase().as_str() {
+                        "function" => config::LuaExprType::Function,
+                        "eval" => config::LuaExprType::Eval,
+                        _ => anyhow::bail!("lua_expr_type needs to be either \"function\" or \"eval\"!")
+                    },
+                    _ => anyhow::bail!("lua_expr_type needs to be of type String!")
+                }
+            } else {
+                Default::default()
+            };
+
+            config::PresentationConfig {
+                lua_expression_type
+            }
+        };
+
         let slides = file
             .get("slide").ok_or(anyhow::anyhow!("No slides defined in file!"))?
             .as_array().ok_or(anyhow::anyhow!("Slides array not defined as array of slides!"))?;
@@ -56,7 +76,7 @@ impl PresentationParser for TomlParser {
 
                 let renderables = elements.into_iter().enumerate().map(|(ie, elem)| {
                     if let toml::Value::Table(map) = elem {
-                        Ok(ParseableRenderable::new(Rc::new(RefCell::new(map.into_iter().map(|(k,v)| Ok::<_, anyhow::Error>((k,value_to_property(v, lua, env)?))).try_collect::<HashMap<String, Property<'static>>>()?))))
+                        Ok(ParseableRenderable::new(Rc::new(RefCell::new(map.into_iter().map(|(k,v)| Ok::<_, anyhow::Error>((k,value_to_property(v, lua, env, config.lua_expression_type)?))).try_collect::<HashMap<String, Property<'static>>>()?))))
                     } else {
                         anyhow::bail!("Element #{} of slide #{} isn't a table!", ie+1, i+1)
                     }
@@ -91,7 +111,8 @@ impl PresentationParser for TomlParser {
 
         Ok(ParseablePresentation {
             slides: parseable_slides,
-            resources
+            resources,
+            config
         })
     }
 }

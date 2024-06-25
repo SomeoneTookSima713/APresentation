@@ -9,7 +9,7 @@
 #              local x = math.min(scr.w, scr.h)
 #              return 0.2 * x
 #              """
-lua-expr-type = "function"
+lua-expr-type = "eval"
 
 [[resource]]
     type = "Image"
@@ -23,13 +23,13 @@ lua-expr-type = "function"
     [[slide.element]]
     # Singular slide element
     type = "Rect"
-    position = [ 250.0, 250.0 ]
+    position = "LUA#{ 100*math.cos(t), 100*math.sin(t) }"
     # Alignment is a special property: It either matches against a predefined
     # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
     # a list of two numbers.
     alignment = "MID_CENTER"
     color = "#808080ff"
-    corner_rounding = 0.6
-    size = ["LUA#return w*0.5",500]
+    corner_rounding = "LUA#math.sin(t/2)*0.5+0.5"
+    size = [500,500]
     texture = { source = "test", rect = [0,0,1,1], sampler = "pixel_perfect" }
     z_index = 1

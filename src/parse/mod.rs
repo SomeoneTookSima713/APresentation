@@ -8,6 +8,7 @@ use std::rc::Rc;
 use once_cell::sync::Lazy;
 
 use crate::presentation::property::{ Property, PropertyValue, PropertyEnvironment };
+use crate::presentation::config;
 
 pub mod resource;
 
@@ -53,7 +54,8 @@ impl<'lua> ParseableRenderable<'lua> {
 
 pub struct ParseablePresentation {
     pub slides: Vec<ParseableSlide>,
-    pub resources: Vec<Box<dyn resource::Resource>>
+    pub resources: Vec<Box<dyn resource::Resource>>,
+    pub config: config::PresentationConfig,
 }
 
 pub struct ParseableSlide {

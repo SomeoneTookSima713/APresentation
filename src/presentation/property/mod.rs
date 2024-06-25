@@ -16,6 +16,8 @@ pub use property_structure::*;
 
 pub use alignment::Alignment;
 
+pub use crate::presentation::config::LuaExprType;
+
 static RNG: Mutex<Lazy<rand::rngs::StdRng>> = Mutex::new(Lazy::new(|| {
     use rand::SeedableRng;
     rand::rngs::StdRng::from_entropy()
@@ -231,11 +233,13 @@ impl<'a> Property<'a> {
 
     /// Converts any lua code block (in string form) into a [`Property`], the
     /// code block's return value being the value of the property.
-    pub fn from_lua_string<S: std::borrow::Borrow<String>>(lua: &'static mlua::Lua, string: S, env: PropertyEnvironment) -> anyhow::Result<Self> {
+    pub fn from_lua_string<S: std::borrow::Borrow<String>>(lua: &'static mlua::Lua, string: S, env: PropertyEnvironment, lua_expr_type: LuaExprType) -> anyhow::Result<Self> {
         const LUA_SNIPPET_APPEND: &str = "local t,w,h = ... ";
 
+        let lua_expr_type_add = if lua_expr_type == LuaExprType::Eval { "return " } else { "" };
+
         log::debug!("Loading Lua-Snippet: {}", string.borrow());
-        let func = lua.load(format!("{LUA_SNIPPET_APPEND}{}",string.borrow())).set_environment((*env).clone()).into_function()?;
+        let func = lua.load(format!("{LUA_SNIPPET_APPEND}{lua_expr_type_add}{}",string.borrow())).set_environment((*env).clone()).into_function()?;
 
         Ok(Self::Eval(func))
     }
