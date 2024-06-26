@@ -4,7 +4,7 @@ use downcast_rs::{ Downcast, impl_downcast };
 
 use super::*;
 
-pub trait RenderableObjectSafe: Downcast {
+pub trait RenderableObjectSafe: Downcast + std::fmt::Debug {
     /// This function gets called at the beginning of a new frame. It's
     /// intended purpose is to be used to delete the caches on any
     /// [`TypedProperty`]s used in the renderable.

@@ -16,7 +16,7 @@ where [(&'static str, PropertyStructure); T::PROPERTY_STRUCTURE_SIZE + B]: Sized
     crate::util::extended_slice::<{ T::PROPERTY_STRUCTURE_SIZE }, B, (&'static str, PropertyStructure)>(sized_property_structure::<T>(), new)
 }
 
-pub trait Renderable {
+pub trait Renderable: std::fmt::Debug {
     const PROPERTY_STRUCTURE: &'static [(&'static str, PropertyStructure)];
 
     /// Please don't define this yourself, things **will** break if you do.
@@ -91,6 +91,7 @@ impl<T: Renderable + 'static> PropertyCompatible<'static> for T {
     }
 }
 
+#[derive(Debug)]
 pub struct BaseProperties {
     position: TypedProperty<'static, (f64, f64)>,
     color: TypedProperty<'static, common_properties::Color>,

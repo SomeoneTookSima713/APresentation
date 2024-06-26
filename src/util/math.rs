@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Rect {
     pub top_left: glam::Vec2,
     pub size: glam::Vec2

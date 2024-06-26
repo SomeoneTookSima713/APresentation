@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use super::super::{ Property, PropertyCompatible, PropertyStructure, EvaluatedPropertyValue };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Color(pub palette::Srgba<f64>);
 
 impl<'lua> PropertyCompatible<'lua> for Color {

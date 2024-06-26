@@ -23,7 +23,7 @@ static RNG: Mutex<Lazy<rand::rngs::StdRng>> = Mutex::new(Lazy::new(|| {
     rand::rngs::StdRng::from_entropy()
 }));
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PropertyEnvironment(pub(self) HashMap<&'static str, PropEnvVal>);
 
 impl std::ops::Deref for PropertyEnvironment {
@@ -40,7 +40,7 @@ impl std::ops::DerefMut for PropertyEnvironment {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PropEnvVal {
     Number(f64),
     Function(mlua::Function<'static>),
@@ -67,13 +67,13 @@ impl mlua::IntoLua<'static> for PropEnvVal {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Property<'lua> {
     Constant(PropertyValue<'lua>),
     Eval(Function<'lua>)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PropertyValue<'lua> {
     Bool(bool),
     Int(i64),
@@ -239,7 +239,8 @@ impl<'a> Property<'a> {
         let lua_expr_type_add = if lua_expr_type == LuaExprType::Eval { "return " } else { "" };
 
         log::debug!("Loading Lua-Snippet: {}", string.borrow());
-        let func = lua.load(format!("{LUA_SNIPPET_APPEND}{lua_expr_type_add}{}",string.borrow())).set_environment((*env).clone()).into_function()?;
+        let code = format!("{LUA_SNIPPET_APPEND}{lua_expr_type_add}{}",string.borrow());
+        let func = lua.load(code).set_environment((*env).clone()).into_function()?;
 
         Ok(Self::Eval(func))
     }
@@ -351,7 +352,7 @@ pub trait PropertyCompatible<'lua> {
     where Self: Sized;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TypedProperty<'lua, T>
 where T: PropertyCompatible<'lua> {
     prop: Property<'lua>,

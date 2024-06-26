@@ -19,7 +19,7 @@ pub static PARSER_IMPLEMENTATIONS: Lazy<HashMap<String, Box<dyn PresentationPars
     (TomlParser::FILE_EXTENSION, TomlParser)
 ].into_iter().map(|(s, v)| (s.to_owned(), Box::new(v) as Box<dyn PresentationParserObjectSafe>)).collect());
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ParseableRenderable<'lua> {
     properties: Rc<RefCell<HashMap<String, Property<'lua>>>>
 }
@@ -52,12 +52,14 @@ impl<'lua> ParseableRenderable<'lua> {
     }
 }
 
+#[derive(Debug)]
 pub struct ParseablePresentation {
     pub slides: Vec<ParseableSlide>,
     pub resources: Vec<Box<dyn resource::Resource>>,
     pub config: config::PresentationConfig,
 }
 
+#[derive(Debug)]
 pub struct ParseableSlide {
     pub renderables: Vec<ParseableRenderable<'static>>
 }

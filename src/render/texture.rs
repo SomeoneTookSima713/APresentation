@@ -8,7 +8,7 @@ pub struct TextureSamplerList {
     pub linear: wgpu::Sampler,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum TextureSamplerSelection {
     PixelPerfect,
     Linear,

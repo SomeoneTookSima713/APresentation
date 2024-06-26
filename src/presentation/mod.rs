@@ -13,7 +13,7 @@ use renderable::{ RenderableRenderingManagerObjectSafe, RenderableObjectSafe };
 use crate::parse;
 
 pub mod config {
-    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
     pub enum LuaExprType {
         Function,
         Eval
@@ -23,7 +23,7 @@ pub mod config {
         fn default() -> Self { Self::Eval }
     }
 
-    #[derive(Default)]
+    #[derive(Default, Debug)]
     pub struct PresentationConfig {
         pub lua_expression_type: LuaExprType
     }
@@ -38,10 +38,12 @@ pub struct Presentation {
     config: config::PresentationConfig,
 }
 
+#[derive(Debug)]
 pub struct Slide {
     renderables: Vec<RenderableWrapper>
 }
 
+#[derive(Debug)]
 struct RenderableWrapper {
     renderable: Box<dyn RenderableObjectSafe>
 }
@@ -63,22 +65,38 @@ impl Presentation {
 
     pub fn load_file<P: AsRef<Path>>(path: P, device: &wgpu::Device, queue: &wgpu::Queue, lua: &'static mlua::Lua) -> anyhow::Result<Self> {
         use std::fs;
+        // log::debug!("Loading presentation at path \"{}\"", path.as_ref().to_string_lossy());
 
         let str = fs::read_to_string(path.as_ref())?;
         let ext = path.as_ref().extension().ok_or(anyhow::anyhow!("Couldn't determine the presentation's file extension!"))?.to_string_lossy();
 
+        // log::debug!("Determined presentation file's extension: \"{ext}\"");
+
         let property_environment = property::get_environment(lua)?;
+
+        // log::debug!("Created Lua Environment für evaluating properties: {property_environment:#?}");
+
+        // log::debug!("Parsing presentation...");
 
         if let Some(parser) = parse::PARSER_IMPLEMENTATIONS.get(ext.as_ref()) {
             let parseable = parser.parse(str, lua, &property_environment)?;
+
+            // log::debug!("Parsed presentation: {parseable:#?}");
+
+            // log::debug!("Loading Presentation...");
+
+            // log::debug!("Loading Resources...");
             for (i, resource) in parseable.resources.into_iter().enumerate() {
                 resource.load(device, queue).map_err(|e|anyhow::anyhow!("Error loading resource #{}: {e}", i+1))?;
+                // log::debug!("Loaded resource: {resource:?}");
             }
 
+            // log::debug!("Loading slides...");
             let slides = parseable.slides.into_iter().enumerate()
                 .map(|(i, p)| {
                     Slide::from_parseable(p).map_err(|e| anyhow::anyhow!("Error loading slide #{}: {e}", i+1))
                 }).chain([Ok(Slide::default())]).try_collect()?;
+            // log::debug!("Loaded slides: {slides:#?}");
 
             Ok(Presentation {
                 slides,

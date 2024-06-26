@@ -9,6 +9,8 @@ include-wgsl-oil = { version = "0.2" }
 winit = { version = "0.30" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 palette = "0.7"
+lyon = "1"
+ab_glyph = "0.2"
 
 pollster = "0.3"
 
@@ -22,7 +24,7 @@ dynstack = "0.4"
 downcast-rs = "1.2"
 
 glam = "0.27"
-mlua = { version = "0.9.9", features = ["luajit", "vendored", "send"] }
+mlua = { version = "0.9.9", features = ["luajit52", "vendored", "send"] }
 rand = "0.8"
 regex = "1"
 

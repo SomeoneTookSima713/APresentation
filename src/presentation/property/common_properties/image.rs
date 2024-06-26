@@ -17,7 +17,7 @@ fn prop_to_num(num: &EvaluatedPropertyValue) -> Option<f32> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Image<'lua> {
     source: Rc<String>,
     rect: TypedProperty<'lua, Rect>,

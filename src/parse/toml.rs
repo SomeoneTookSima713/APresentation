@@ -45,14 +45,14 @@ impl PresentationParser for TomlParser {
         let file: Table = file.parse()?;
 
         let config = {
-            let lua_expression_type = if let Some(val) = file.get("lua_expr_type") {
+            let lua_expression_type = if let Some(val) = file.get("lua-expr-type") {
                 match val {
                     toml::Value::String(ref s) => match s.to_lowercase().as_str() {
                         "function" => config::LuaExprType::Function,
                         "eval" => config::LuaExprType::Eval,
-                        _ => anyhow::bail!("lua_expr_type needs to be either \"function\" or \"eval\"!")
+                        _ => anyhow::bail!("lua-expr-type needs to be either \"function\" or \"eval\"!")
                     },
-                    _ => anyhow::bail!("lua_expr_type needs to be of type String!")
+                    _ => anyhow::bail!("lua-expr-type needs to be of type String!")
                 }
             } else {
                 Default::default()

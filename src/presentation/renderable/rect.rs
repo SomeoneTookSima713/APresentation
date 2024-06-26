@@ -11,6 +11,7 @@ use crate::shaders::rect as shader;
 use crate::render::texture;
 use crate::util::{ hashmap_ext::HashMapExt, math };
 
+#[derive(Debug)]
 pub struct Rectangle<'lua> {
     base_properties: BaseProperties,
     size: TypedProperty<'lua, (f64, f64)>,
@@ -24,6 +25,7 @@ impl<'lua> Rectangle<'lua> {
     }
 }
 
+#[derive(Debug)]
 pub enum RectangleTextureType<'lua> {
     White,
     Custom(properties::Image<'lua>)
@@ -221,7 +223,7 @@ impl RenderableRenderingManager for RectangleRenderer {
             encoder.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             encoder.set_vertex_buffer(1, self.instance_buffers.get(texture_path).unwrap().slice(..));
             encoder.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            encoder.draw_indexed(0..RectangleVertex::INDICES.len() as u32, 0, 0..1);
+            encoder.draw_indexed(0..RectangleVertex::INDICES.len() as u32, 0, 0..self.instances.get(texture_path).unwrap().len() as u32);
         }
 
         for val in self.instances.values_mut() {

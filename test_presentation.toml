@@ -9,7 +9,7 @@
 #              local x = math.min(scr.w, scr.h)
 #              return 0.2 * x
 #              """
-lua-expr-type = "eval"
+lua-expr-type = "function"
 
 [[resource]]
     type = "Image"
@@ -23,13 +23,55 @@ lua-expr-type = "eval"
     [[slide.element]]
     # Singular slide element
     type = "Rect"
-    position = "LUA#{ 100*math.cos(t), 100*math.sin(t) }"
+    position = "LUA#return { 100*math.cos(t), 100*math.sin(t) }"
     # Alignment is a special property: It either matches against a predefined
     # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
     # a list of two numbers.
     alignment = "MID_CENTER"
     color = "#808080ff"
-    corner_rounding = "LUA#math.sin(t/2)*0.5+0.5"
+    corner_rounding = "LUA#return math.sin(t/2)*0.5+0.5"
+    size = [500,500]
+    texture = { source = "test", rect = [0,0,1,1], sampler = "pixel_perfect" }
+    z_index = 1
+
+    [[slide.element]]
+    # Singular slide element
+    type = "Rect"
+    position = "LUA#return { 100*math.cos(t+0.2), 100*math.sin(t+0.2) }"
+    # Alignment is a special property: It either matches against a predefined
+    # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
+    # a list of two numbers.
+    alignment = "MID_CENTER"
+    color = "#808080ff"
+    corner_rounding = "LUA#return math.sin(t/2)*0.5+0.5"
+    size = [500,500]
+    texture = { source = "test", rect = [0,0,1,1], sampler = "pixel_perfect" }
+    z_index = 1
+
+    [[slide.element]]
+    # Singular slide element
+    type = "Rect"
+    position = "LUA#return { 100*math.cos(t+0.4), 100*math.sin(t+0.4) }"
+    # Alignment is a special property: It either matches against a predefined
+    # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
+    # a list of two numbers.
+    alignment = "MID_CENTER"
+    color = "#808080ff"
+    corner_rounding = "LUA#return math.sin(t/2)*0.5+0.5"
+    size = [500,500]
+    texture = { source = "test", rect = [0,0,1,1], sampler = "pixel_perfect" }
+    z_index = 1
+
+    [[slide.element]]
+    # Singular slide element
+    type = "Rect"
+    position = "LUA#return { 100*math.cos(t+0.6), 100*math.sin(t+0.6) }"
+    # Alignment is a special property: It either matches against a predefined
+    # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
+    # a list of two numbers.
+    alignment = "MID_CENTER"
+    color = "#808080ff"
+    corner_rounding = "LUA#return math.sin(t/2)*0.5+0.5"
     size = [500,500]
     texture = { source = "test", rect = [0,0,1,1], sampler = "pixel_perfect" }
     z_index = 1
