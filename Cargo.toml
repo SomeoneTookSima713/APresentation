@@ -35,6 +35,7 @@ fontdb = "0.18"
 memmap2 = "0.9"
 lyon = "1"
 ab_glyph = "0.2"
+harfbuzz_rs = "2"
 
 serde = "1"
 toml = "0.8"

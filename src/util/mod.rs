@@ -92,6 +92,10 @@ pub trait FontDBSourceExt {
     fn with_data<P, T>(&self, p: P) -> Option<T>
     where
         P: FnOnce(&[u8]) -> T;
+    
+    fn get_data(&self) -> Option<Vec<u8>> {
+        self.with_data(|d| Vec::from(d))
+    }
 }
 
 impl FontDBSourceExt for fontdb::Source {
