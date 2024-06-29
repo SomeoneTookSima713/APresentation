@@ -9,8 +9,6 @@ include-wgsl-oil = { version = "0.2" }
 winit = { version = "0.30" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 palette = "0.7"
-lyon = "1"
-ab_glyph = "0.2"
 
 pollster = "0.3"
 
@@ -32,6 +30,11 @@ impl-trait-for-tuples = "0.2"
 xxhash-rust = { version = "0.8", features = ["xxh3", "const_xxh3"] }
 try-iterator = "1"
 hex = "0.4"
+
+fontdb = "0.18"
+memmap2 = "0.9"
+lyon = "1"
+ab_glyph = "0.2"
 
 serde = "1"
 toml = "0.8"

@@ -87,3 +87,31 @@ impl<'a, 'lua, T: lua_helper::IntoLuaObjectSafe<'lua> + ?Sized> DynSlice<'a, T> 
         })
     }
 }
+
+pub trait FontDBSourceExt {
+    fn with_data<P, T>(&self, p: P) -> Option<T>
+    where
+        P: FnOnce(&[u8]) -> T;
+}
+
+impl FontDBSourceExt for fontdb::Source {
+    /// Copied from the internally used function which for some reason isn't public.
+    /// 
+    /// (Like seriously, the [`Database::with_face_data()`](fontdb::Database::with_face_data()) function, which uses this exact function, actually clones the data beforehand, making this whole closure thing completely useless as you could also just return the cloned data directly)
+    fn with_data<P, T>(&self, p: P) -> Option<T>
+    where
+        P: FnOnce(&[u8]) -> T,
+        {
+        use fontdb::Source;
+        match &self {
+            Source::File(ref path) => {
+                let file = std::fs::File::open(path).ok()?;
+                let data = unsafe { &memmap2::MmapOptions::new().map(&file).ok()? };
+
+                Some(p(data))
+            }
+            Source::Binary(ref data) => Some(p(data.as_ref().as_ref())),
+            Source::SharedFile(_, ref data) => Some(p(data.as_ref().as_ref())),
+        }
+    }
+}

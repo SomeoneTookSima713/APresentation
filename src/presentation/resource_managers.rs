@@ -55,25 +55,36 @@ impl TextureManager {
     }
 }
 
-pub struct FontManager(AtomicVec<Arc<font::Font>>, RwLock<HashMap<String, usize>>);
+pub struct FontManager {
+    fonts: AtomicVec<Arc<font::Font>>,
+    font_indices: RwLock<HashMap<String, usize>>,
+    font_database: fontdb::Database,
+}
 
 #[allow(unused)]
 impl FontManager {
     pub fn new() -> Self {
-        Self(AtomicVec::new(16).unwrap(), RwLock::new(HashMap::new()))
+        let mut font_database = fontdb::Database::new();
+        font_database.load_system_fonts();
+
+        Self {
+            fonts: AtomicVec::new(16).unwrap(),
+            font_indices: RwLock::new(HashMap::new()),
+            font_database
+        }
     }
 
     pub fn get<Q>(&self, key: &Q) -> Option<Arc<font::Font>>
     where Q: ?Sized + Eq + Hash, String: Borrow<Q> {
-        let Ok(hm) = self.1.read() else {
+        let Ok(hm) = self.font_indices.read() else {
             log::warn!("Couldn't access FontManager's String-ID HashMap! (this indicates a poisoned lock -> Something panicked!)");
             return None;
         };
-        hm.get(key).and_then(|k| self.0.get(*k)).map(|g| g.clone())
+        hm.get(key).and_then(|k| self.fonts.get(*k)).map(|g| g.clone())
     }
 
     pub fn insert(&self, key: String, texture: Arc<font::Font>) -> anyhow::Result<()> {
-        match self.1.read().map(|l| l.get(&key).is_some()) {
+        match self.font_indices.read().map(|l| l.get(&key).is_some()) {
             Ok(true) => log::warn!("Trying to insert font with key \"{key}\" into FontManager even though a font already exists at that key! Replacing old font."),
             Ok(false) =>  {},
             Err(_) => {
@@ -81,8 +92,8 @@ impl FontManager {
                 anyhow::bail!("FontManager's String-ID HashMap has a poisoned lock!")
             }
         }
-        let ind = self.0.push(texture)?;
-        let Ok(mut hm) = self.1.write() else {
+        let ind = self.fonts.push(texture)?;
+        let Ok(mut hm) = self.font_indices.write() else {
             anyhow::bail!("FontManager's String-ID HashMap has a poisoned lock!");
         };
         hm.insert(key, ind);
@@ -91,11 +102,15 @@ impl FontManager {
 
     pub fn exists<Q>(&self, key: &Q) -> bool
     where Q: ?Sized + Eq + Hash, String: Borrow<Q> {
-        let Ok(hm) = self.1.read() else {
+        let Ok(hm) = self.font_indices.read() else {
             log::warn!("Couldn't access FontManager's String-ID HashMap! (this indicates a poisoned lock -> Something panicked!)");
             return false;
         };
         hm.get(key).is_some()
+    }
+
+    pub fn get_database(&self) -> &fontdb::Database {
+        &self.font_database
     }
 }
 
