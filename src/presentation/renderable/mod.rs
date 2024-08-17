@@ -7,11 +7,12 @@ use crate::parse::ParseableRenderable;
 use crate::render::camera::Camera;
 
 pub mod rect;
+pub mod text;
 
 pub mod object_safe;
 pub use object_safe::*;
 
-pub const fn extended_structure<T: Renderable, const B: usize>(new: [(&'static str, PropertyStructure); B]) -> [(&'static str, PropertyStructure); T::PROPERTY_STRUCTURE_SIZE + B]
+pub const fn extended_structure<T: Renderable + 'static, const B: usize>(new: [(&'static str, PropertyStructure); B]) -> [(&'static str, PropertyStructure); T::PROPERTY_STRUCTURE_SIZE + B]
 where [(&'static str, PropertyStructure); T::PROPERTY_STRUCTURE_SIZE + B]: Sized {
     crate::util::extended_slice::<{ T::PROPERTY_STRUCTURE_SIZE }, B, (&'static str, PropertyStructure)>(sized_property_structure::<T>(), new)
 }
@@ -171,6 +172,6 @@ pub static RENDERABLES: Lazy<HashMap<String, fn(ParseableRenderable<'static>) ->
     hm
 });
 
-pub fn register_renderables(hm: &mut HashMap<String, fn(ParseableRenderable<'static>) -> anyhow::Result<Box<dyn RenderableObjectSafe>>>) {
-    hm.insert("Rect".to_string(), rect::Rectangle::from_parseable_boxed);
-}
+crate::util::macros::renderable::renderables!(
+    "Rect" => rect::Rectangle
+);

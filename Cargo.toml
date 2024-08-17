@@ -4,38 +4,49 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wgpu = "0.20"
-include-wgsl-oil = { version = "0.2" }
-winit = { version = "0.30" }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-palette = "0.7"
+# Rendering stuff
+wgpu = "22.1" # Rendering backend used for everything
+include-wgsl-oil = { version = "0.2" } # For error-checking shaders at compile-time
+winit = { version = "0.30" } # Library wrapping os-specific windowing shenanigans
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] } # For loading images
+palette = "0.7" # For elaborate color support (not only RGB, but also HSV, HSL, OkLAB and many more!)
+hex = "0.4" # Allows converting any data to and from hexadecimal, but used for converting color codes here
+ab_glyph = "0.2" # For rasterizing font glyphs
 
-pollster = "0.3"
+pollster = "0.3" # Continuous polling of one async function, blocking the thread (needed for using `winit` with `wgpu`)
 
-log = "*"
-pretty_env_logger = "0.5"
+# Logging
+log = "*" # Main logging library (basically an interface for all possible logging backends)
+pretty_env_logger = "0.5" # A logging backend for the `log` crate, providing a pretty logger that can be configured using environment variables
 
-anyhow = "*"
-bytemuck = { version = "1.12", features = ["derive"] }
-once_cell = "*"
-dynstack = "0.4"
-downcast-rs = "1.2"
+# Data structures and similar stuff
+anyhow = "*" # Makes error handling pretty easy by wrapping every type of error into one type
+bytemuck = { version = "1.12", features = ["derive"] } # Allows easily casting types to byte-slices
+once_cell = "*" # Provides lazily-initialized types (very useful for statics)
+dynstack = "0.4" # Provides a way to store a list of trait objects without an extra layer of pointer indirection
+downcast-rs = "1.2" # Macro allowing implementing a `downcast` function on custom traits, not needing `Any` for it anymore
+bitflags = "2.6" # Macro for creating bitflags
+xxhash-rust = { version = "0.8", features = ["xxh3", "const_xxh3"] } # Very fast hashing algorithms
 
-glam = "0.27"
-mlua = { version = "0.9.9", features = ["luajit52", "vendored", "send"] }
-rand = "0.8"
-regex = "1"
+# Math and user-created expressions
+glam = "0.27" # Math library
+mlua = { version = "0.9.9", features = ["luajit52", "vendored", "send"] } # Provides the ability to embed lua code
+rand = "0.8" # Random numbers
+regex = "1" # Regular expressions
 
 impl-trait-for-tuples = "0.2"
-xxhash-rust = { version = "0.8", features = ["xxh3", "const_xxh3"] }
 try-iterator = "1"
-hex = "0.4"
 
-fontdb = "0.18"
-memmap2 = "0.9"
-lyon = "1"
-ab_glyph = "0.2"
-harfbuzz_rs = "2"
+# Font parsing and text processing
+pulldown-cmark  = { version = "0.11", default-features = false, features = ["simd"] } # For parsing markdown
+textwrap = { version = "0.16", features = ["smawk", "hyphenation"] } # For implementing text wrapping
+hyphenation = { version = "0.8", features = ["embed_all"] } # For implementing hyphenation of text while wrapping text
+whatlang = "0.16" # For automatically determining the language of a piece of text (for usage with `hyphenation`)
+memmap2 = "0.9" # For mapping files to memory (makes parsing font files faster)
+fontdb = "0.21.0" # For keeping track of loaded fonts and loading them as well (both from the user and the system)
+ttf-parser = "0.24" # For gathering information from a .ttf file
+harfbuzz_rs = "2" # For text shaping (finding out what characters go where)
 
-serde = "1"
-toml = "0.8"
+# Document parsing
+serde = "1" # For implementing the logic necessary to serialize and deserialize a Rust struct easily
+toml = "0.8" # For implementing the serialization and deserialization of compatible structs to and from TOML files

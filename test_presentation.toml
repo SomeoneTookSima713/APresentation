@@ -1,3 +1,5 @@
+#:schema ./presentation_schema.json
+
 # Global configuration
 
 # How the program should handle lua code snippets.
@@ -17,61 +19,42 @@ lua-expr-type = "function"
     file = "test.jpeg"
     sampler = "Linear"
 
+[[resource]]
+    type = "Font"
+    path = "./" # If the path to a font resource ends in a slash or backslash, the input will be interpreted as a directory and all fonts will be loaded from it.
+
 [[slide]]
     # Slide-specific configuration
 
     [[slide.element]]
-    # Singular slide element
-    type = "Rect"
-    position = "LUA#return { 100*math.cos(t), 100*math.sin(t) }"
-    # Alignment is a special property: It either matches against a predefined
-    # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
-    # a list of two numbers.
-    alignment = "MID_CENTER"
-    color = "#808080ff"
-    corner_rounding = "LUA#return math.sin(t/2)*0.5+0.5"
-    size = [500,500]
-    texture = { source = "test", rect = [0,0,1,1], sampler = "pixel_perfect" }
-    z_index = 1
-
+        # Singular slide element
+        type = "Rect"
+        position = "LUA#return { 100*math.cos(t), 100*math.sin(t) }"
+        # Alignment is a special property: It either matches against a predefined
+        # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
+        # a list of two numbers.
+        alignment = "MID_CENTER"
+        color = "#808080ff"
+        corner_rounding = "LUA#return math.sin(t/2)*0.5+0.5"
+        size = [500,500]
+        texture = { source = "test", rect = [0,0,1,1], sampler = "PixelPerfect" }
+        z_index = 1
+    
     [[slide.element]]
-    # Singular slide element
-    type = "Rect"
-    position = "LUA#return { 100*math.cos(t+0.2), 100*math.sin(t+0.2) }"
-    # Alignment is a special property: It either matches against a predefined
-    # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
-    # a list of two numbers.
-    alignment = "MID_CENTER"
-    color = "#808080ff"
-    corner_rounding = "LUA#return math.sin(t/2)*0.5+0.5"
-    size = [500,500]
-    texture = { source = "test", rect = [0,0,1,1], sampler = "pixel_perfect" }
-    z_index = 1
+        type = "Text"
+        position = [ 0, 0 ]
+        alignment = "MID_CENTER"
+        z_index = 10
 
-    [[slide.element]]
-    # Singular slide element
-    type = "Rect"
-    position = "LUA#return { 100*math.cos(t+0.4), 100*math.sin(t+0.4) }"
-    # Alignment is a special property: It either matches against a predefined
-    # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
-    # a list of two numbers.
-    alignment = "MID_CENTER"
-    color = "#808080ff"
-    corner_rounding = "LUA#return math.sin(t/2)*0.5+0.5"
-    size = [500,500]
-    texture = { source = "test", rect = [0,0,1,1], sampler = "pixel_perfect" }
-    z_index = 1
+        color = "#494949"
+        font = "WingDings"
+        synthetic_style = ["bold", "italic"]
 
-    [[slide.element]]
-    # Singular slide element
-    type = "Rect"
-    position = "LUA#return { 100*math.cos(t+0.6), 100*math.sin(t+0.6) }"
-    # Alignment is a special property: It either matches against a predefined
-    # set of constants (pattern is (TOP|MID|BOTTOM)_(LEFT|CENTER|RIGHT)) or
-    # a list of two numbers.
-    alignment = "MID_CENTER"
-    color = "#808080ff"
-    corner_rounding = "LUA#return math.sin(t/2)*0.5+0.5"
-    size = [500,500]
-    texture = { source = "test", rect = [0,0,1,1], sampler = "pixel_perfect" }
-    z_index = 1
+        text = """
+        # Header
+
+        This is my example text block! It uses markdown internally for text formatting.
+
+        The markdown implementation is based on *CommonMark*, a **universal** Markdown standard created in 2014.
+
+        """

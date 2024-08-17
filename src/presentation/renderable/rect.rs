@@ -169,7 +169,8 @@ impl RenderableRenderingManager for RectangleRenderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
-            multiview: None
+            multiview: None,
+            cache: None
         });
 
         let texture = texture::Texture::from_color(device, queue, [255,255,255,255], (8,8), texture::TextureSamplerSelection::PixelPerfect, None)?;

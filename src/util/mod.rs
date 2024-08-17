@@ -6,6 +6,7 @@ pub mod hashmap_ext;
 pub mod lua_helper;
 pub mod debug_state;
 pub mod math;
+pub mod macros;
 
 pub use hashable_value::*;
 
@@ -117,5 +118,45 @@ impl FontDBSourceExt for fontdb::Source {
             Source::Binary(ref data) => Some(p(data.as_ref().as_ref())),
             Source::SharedFile(_, ref data) => Some(p(data.as_ref().as_ref())),
         }
+    }
+}
+
+pub struct OwnedParsedFace {
+    face: ttf_parser::Face<'static>,
+    orig_len: usize,
+    orig_cap: usize,
+    orig_data_ref: &'static [u8],
+    face_index: u32
+}
+
+impl OwnedParsedFace {
+    pub fn parse(data: Vec<u8>, index: u32) -> Result<Self, ttf_parser::FaceParsingError> {
+        let orig_len = data.len();
+        let orig_cap = data.capacity();
+        let leaked_data = &*data.leak();
+
+        let face = ttf_parser::Face::parse(leaked_data, index)?;
+
+        Ok(Self { face, orig_len, orig_cap, orig_data_ref: leaked_data, face_index: index })
+    }
+}
+
+impl std::ops::Deref for OwnedParsedFace {
+    type Target = ttf_parser::Face<'static>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.face
+    }
+}
+
+impl std::ops::DerefMut for OwnedParsedFace {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.face
+    }
+}
+
+impl Drop for OwnedParsedFace {
+    fn drop(&mut self) {
+        drop(unsafe { Vec::from_raw_parts(self.orig_data_ref.as_ptr() as *mut u8, self.orig_len, self.orig_cap) });
     }
 }

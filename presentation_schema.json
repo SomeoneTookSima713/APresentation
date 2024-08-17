@@ -1,0 +1,153 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://someonetooksima713.github.io/apresentation/presentation.schema.json",
+    "title": "APresentation Presentation",
+    "description": "A presentation file for APresentation",
+    "type": "object",
+    "properties": {
+        "config": {
+            "description": "Global config for the whole presentation, e.g. the way lua code snippets are interpreted.",
+            "type": "object",
+            "properties": {
+                "lua-expr-type": {
+                    "description": "The way lua expressions are interpreted.",
+                    "default": "function",
+                    "enum": [ "eval", "function" ],
+                    "type": "string"
+                }
+            }
+        },
+        "resource": {
+            "type": "array",
+            "items": {
+                "description": "A resource, like an image or a font, that gets used in the presentation.",
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": [ "Image", "Font" ]
+                    }
+                },
+                "required": ["type"],
+                "allOf": [
+                    {
+                        "if": {
+                            "properties": {
+                                "type": { "const": "Image" }
+                            }
+                        },
+                        "then": {
+                            "properties": {
+                                "name": {
+                                    "description": "The name of the Image that should be used to identify it.",
+                                    "type": "string"
+                                },
+                                "file": {
+                                    "description": "The path to the image.",
+                                    "type": "string"
+                                },
+                                "sampler": {
+                                    "description": "The sampler to use. This determines how the image will be displayed if the dimensions it's rendered at don't match it's own.",
+                                    "type": "string",
+                                    "enum": ["PixelPerfect", "Linear"]
+                                }
+                            },
+                            "required": [ "name", "file" ]
+                        }
+                    },
+                    {
+                        "if": {
+                            "properties": {
+                                "type": { "const": "Font" }
+                            }
+                        },
+                        "then": {
+                            "properties": {
+                                "path": {
+                                    "description": "The path to the font. Can also be a directory, in which case all contained fonts will be loaded.",
+                                    "type": "string"
+                                }
+                            },
+                            "required": [ "path" ]
+                        }
+                    }
+                ]
+            }
+        },
+        "slide": {
+            "description": "A slide of the presentation.",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "element": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "description": "An element of the slide, e.g. an image.",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": [ "Rect", "Text" ]
+                                }
+                            },
+                            "allOf": [
+                                {
+                                    "if": {
+                                        "properties":  {
+                                            "type":  { "constant": "Rect" }
+                                        }
+                                    },
+                                    "then": {
+                                        "properties": {
+                                            "alignment": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "TOP_LEFT",
+                                                            "MID_LEFT",
+                                                            "BOTTOM_LEFT",
+                                                            "TOP_CENTER",
+                                                            "MID_CENTER",
+                                                            "BOTTOM_CENTER",
+                                                            "TOP_RIGHT",
+                                                            "MID_RIGHT",
+                                                            "BOTTOM_RIGHT"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "type": "array",
+                                                        "prefixItems": [
+                                                            { "type": "number" },
+                                                            { "type": "number" }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "position": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string",
+                                                        "pattern": "LUA#.+"
+                                                    },
+                                                    {
+                                                        "type": "array",
+                                                        "prefixItems": [
+                                                            { "type": "number" },
+                                                            { "type": "number" }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

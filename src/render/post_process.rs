@@ -106,7 +106,8 @@ impl PostProcessPipeline {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
-            multiview: None
+            multiview: None,
+            cache: None
         });
 
         let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

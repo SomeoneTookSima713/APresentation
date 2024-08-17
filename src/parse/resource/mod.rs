@@ -7,16 +7,20 @@ use once_cell::sync::Lazy;
 use crate::presentation::property::EvaluatedPropertyValue;
 
 pub mod image;
-// pub mod font;
+pub mod font;
 
 pub use image::Image;
+pub use font::Font;
+
+use crate::util::macros::resource::resources;
 
 type FnResource = dyn Fn(&HashMap<String, EvaluatedPropertyValue>) -> anyhow::Result<Box<dyn Resource>>;
 
 thread_local! {
-    pub static RESOURCE_TYPES: Lazy<HashMap<String, Box<FnResource>>> = Lazy::new(|| [
-        (Image::get_type(), Box::new(Image::create_boxed))
-    ].into_iter().map(|(k,v)| (k.to_string(),v as Box<FnResource>)).collect::<HashMap<String, Box<FnResource>>>());
+    pub static RESOURCE_TYPES: Lazy<HashMap<String, Box<FnResource>>> = resources!(
+        Image,
+        Font
+    );
 }
 
 pub trait Resource: std::fmt::Debug {
