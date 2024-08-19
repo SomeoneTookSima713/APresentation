@@ -19,9 +19,9 @@ lua-expr-type = "function"
     file = "test.jpeg"
     sampler = "Linear"
 
-[[resource]]
-    type = "Font"
-    path = "./" # If the path to a font resource ends in a slash or backslash, the input will be interpreted as a directory and all fonts will be loaded from it.
+# [[resource]]
+#     type = "Font"
+#     path = "./" # If the path to a font resource ends in a slash or backslash, the input will be interpreted as a directory and all fonts will be loaded from it.
 
 [[slide]]
     # Slide-specific configuration
@@ -40,21 +40,21 @@ lua-expr-type = "function"
         texture = { source = "test", rect = [0,0,1,1], sampler = "PixelPerfect" }
         z_index = 1
     
-    [[slide.element]]
-        type = "Text"
-        position = [ 0, 0 ]
-        alignment = "MID_CENTER"
-        z_index = 10
+    # [[slide.element]]
+    #     type = "Text"
+    #     position = [ 0, 0 ]
+    #     alignment = "MID_CENTER"
+    #     z_index = 10
 
-        color = "#494949"
-        font = "WingDings"
-        synthetic_style = ["bold", "italic"]
+    #     color = "#494949"
+    #     font = "WingDings"
+    #     synthetic_style = ["bold", "italic"]
 
-        text = """
-        # Header
+    #     text = """
+    #     # Header
 
-        This is my example text block! It uses markdown internally for text formatting.
+    #     This is my example text block! It uses markdown internally for text formatting.
 
-        The markdown implementation is based on *CommonMark*, a **universal** Markdown standard created in 2014.
+    #     The markdown implementation is based on *CommonMark*, a **universal** Markdown standard created in 2014.
 
-        """
+    #     """

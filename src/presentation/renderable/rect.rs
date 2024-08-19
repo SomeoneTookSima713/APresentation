@@ -15,14 +15,8 @@ use crate::util::{ hashmap_ext::HashMapExt, math };
 pub struct Rectangle<'lua> {
     base_properties: BaseProperties,
     size: TypedProperty<'lua, (f64, f64)>,
-    corner_rounding: TypedProperty<'lua, f64>,
+    corner_rounding: TypedProperty<'lua, properties::ContextualList<'lua, f64, 4>>,
     texture: RectangleTextureType<'lua>,
-}
-
-impl<'lua> Rectangle<'lua> {
-    pub fn new(base_properties: BaseProperties, size: TypedProperty<'lua, (f64, f64)>, corner_rounding: TypedProperty<'lua, f64>, texture: RectangleTextureType<'lua>) -> Self {
-        Rectangle { base_properties, size, corner_rounding, texture }
-    }
 }
 
 #[derive(Debug)]
@@ -70,7 +64,7 @@ struct RectangleInstance {
     pub size: [f32;2],
     pub color: [f32;4],
     pub uv: [f32; 4],
-    pub corner_rounding: f32,
+    pub corner_rounding: [f32;4],
 }
 
 impl RectangleInstance {
@@ -101,7 +95,7 @@ impl RectangleInstance {
             wgpu::VertexAttribute {
                 offset: std::mem::size_of::<[f32; 13]>() as wgpu::BufferAddress,
                 shader_location: 5,
-                format: wgpu::VertexFormat::Float32,
+                format: wgpu::VertexFormat::Float32x4,
             }
         ]
     };
@@ -257,7 +251,7 @@ impl RenderableRenderingManager for RectangleRenderer {
             size: [size.0 as f32, size.1 as f32],
             color: (*color).into(),
             uv: (*image.rect().get(args.clone())?).into(),
-            corner_rounding: *corner_rounding as f32,
+            corner_rounding: corner_rounding.get_list_copied().map(|f| f as f32),
         });
         Ok(())
     }
@@ -266,7 +260,10 @@ impl RenderableRenderingManager for RectangleRenderer {
 impl Renderable for Rectangle<'static> {
     const PROPERTY_STRUCTURE: &'static [(&'static str, PropertyStructure)] = &extended_structure::<BaseProperties, _>([
         ("size", <(f64, f64) as PropertyCompatible<'static>>::STRUCTURE),
-        ("corner_rounding", f64::STRUCTURE),
+        ("corner_rounding", PropertyStructure::Or(&[
+            <[f64;4] as PropertyCompatible<'static>>::STRUCTURE,
+            f64::STRUCTURE
+        ])),
     ]);
 
     fn from_parseable(parseable: ParseableRenderable<'static>) -> anyhow::Result<Self>

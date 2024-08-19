@@ -2,8 +2,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use pulldown_cmark::{ Parser, Options };
-
 use super::{
     Renderable,
     RenderableRenderingManager,
@@ -19,6 +17,8 @@ use crate::presentation::property::{
     TypedProperty,
 };
 use crate::render::font::Font;
+
+mod markdown;
 
 bitflags::bitflags! {
     struct SyntheticStyle: u8 {
@@ -111,7 +111,11 @@ impl<'lua> PropertyCompatible<'lua> for TextPart {
 
 #[derive(Debug)]
 pub struct Text {
-    markdown_parser: Parser,
+}
+
+impl Text {
+    fn parse(markdown: &str) {
+    }
 }
 
 impl Renderable for Text {

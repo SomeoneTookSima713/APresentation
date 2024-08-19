@@ -15,9 +15,10 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) tex_coords: vec2<f32>,
-    @location(2) corner_rounding: f32,
+    @location(2) corner_rounding: vec4<f32>,
     @location(3) centered_position: vec2<f32>,
     @location(4) size: vec2<f32>,
+    @location(5) tex_start: vec2<f32>
 };
 
 struct Instance {
@@ -25,7 +26,7 @@ struct Instance {
     @location(2) size: vec2<f32>,
     @location(3) color: vec4<f32>,
     @location(4) uv: vec4<f32>,
-    @location(5) corner_rounding: f32,
+    @location(5) corner_rounding: vec4<f32>,
 }
 
 @vertex
@@ -67,6 +68,7 @@ fn vs_main(
     out.corner_rounding = instance.corner_rounding;
     out.centered_position = model.position * instance.size;
     out.size = instance.size;
+    out.tex_start = instance.uv.xy;
     return out;
 }
 
@@ -80,10 +82,12 @@ const GAUSSIAN_STUFF = array(1.0, 0.5, 0.25);
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    if in.corner_rounding < 0.0001 {
+    var ind: u32 = u32(round(in.tex_coords.x - in.tex_start.x))+u32(2f*round(in.tex_coords.y - in.tex_start.y));
+
+    if in.corner_rounding[ind] < 0.0001 {
         return in.color * textureSample(tex, samp, in.tex_coords);
     }
-    var p: f32 = 2.0/(min(in.size.x, in.size.y)*pow(in.corner_rounding, 2.0));
+    var p: f32 = 2.0/(min(in.size.x, in.size.y)*pow(in.corner_rounding[ind], 2.0));
     var coverage: f32 = 0.0;
     var div: f32 = 0.0;
     for (var x = 0; x<=0; x+=1) {

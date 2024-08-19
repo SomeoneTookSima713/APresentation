@@ -38,7 +38,7 @@ impl-trait-for-tuples = "0.2"
 try-iterator = "1"
 
 # Font parsing and text processing
-pulldown-cmark  = { version = "0.11", default-features = false, features = ["simd"] } # For parsing markdown
+markdown-it = "0.6" # For parsing Markdown
 textwrap = { version = "0.16", features = ["smawk", "hyphenation"] } # For implementing text wrapping
 hyphenation = { version = "0.8", features = ["embed_all"] } # For implementing hyphenation of text while wrapping text
 whatlang = "0.16" # For automatically determining the language of a piece of text (for usage with `hyphenation`)
