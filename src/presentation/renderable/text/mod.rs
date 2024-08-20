@@ -140,6 +140,10 @@ impl Renderable for Text {
     {
         Ok(())
     }
+
+    fn add_cascading_renderables(&mut self, adder: &mut crate::presentation::RenderableAdder) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 pub struct TextRenderingManager;

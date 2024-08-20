@@ -352,11 +352,34 @@ pub trait PropertyCompatible<'lua> {
     where Self: Sized;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct TypedProperty<'lua, T>
 where T: PropertyCompatible<'lua> {
     prop: Property<'lua>,
-    converted: RefCell<Option<T>>
+    converted: RefCell<Option<T>>,
+    transform: Option<Rc<Box<dyn Fn(T) -> T>>>
+}
+
+impl<'lua, T: PropertyCompatible<'lua>> std::fmt::Debug for TypedProperty<'lua, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            write!(
+                f, "TypedProperty<{}> {{\n\tprop: {:#?},\n\tconverted: {},\n\ttransform: {}\n}}",
+                std::any::type_name::<T>(),
+                self.prop,
+                self.converted.try_borrow().map(|v| if v.is_some() { "Some([Cache])" } else { "None" }).unwrap_or("[Couldn't borrow]"),
+                if self.transform.is_some() { "Some([Closure])" } else { "None" }
+            )
+        } else {
+            write!(
+                f, "TypedProperty<{}> {{ prop: {:?}, converted: {}, transform: {} }}",
+                std::any::type_name::<T>(),
+                self.prop,
+                self.converted.try_borrow().map(|v| if v.is_some() { "Some([Cache])" } else { "None" }).unwrap_or("[Couldn't borrow]"),
+                if self.transform.is_some() { "Some([Closure])" } else { "None" }
+            )
+        }
+    }
 }
 
 impl<'lua, T> TypedProperty<'lua, T>
@@ -365,7 +388,14 @@ where T: PropertyCompatible<'lua> {
     pub fn new(base: Property<'lua>) -> anyhow::Result<Self> {
         T::STRUCTURE.check_structure(&base)?.map_err(|e|anyhow::anyhow!("{e}"))?;
 
-        Ok(Self { prop: base, converted: RefCell::new(None) })
+        Ok(Self { prop: base, converted: RefCell::new(None), transform: None })
+    }
+
+    /// Creates a new [`TypedProperty`] from a regular [`Property`] and a transformating function.
+    pub fn new_with_transform(base: Property<'lua>, transform: impl Fn(T) -> T + 'static) -> anyhow::Result<Self> {
+        T::STRUCTURE.check_structure(&base)?.map_err(|e|anyhow::anyhow!("{e}"))?;
+
+        Ok(Self { prop: base, converted: RefCell::new(None), transform: Some(Rc::new(Box::new(transform) as Box<_>)) })
     }
 
     /// Deletes the internal cache for the evaluated value.
@@ -388,7 +418,12 @@ where T: PropertyCompatible<'lua> {
             anyhow::bail!("Cache of TypedProperty couldn't be mutably borrowed!");
         };
         if borrow.is_none() {
-            *borrow = Some(T::convert_from(self.prop.clone(), args)?);
+            let v = if let Some(f) = &self.transform {
+                (f)(T::convert_from(self.prop.clone(), args)?)
+            } else {
+                T::convert_from(self.prop.clone(), args)?
+            };
+            *borrow = Some(v);
         }
         drop(borrow);
         std::cell::Ref::filter_map(self.converted.borrow(), |r| r.as_ref()).map_err(|_|anyhow::anyhow!("[TypedProperty].converted was None even though it was set the literal line before!"))

@@ -152,31 +152,59 @@ impl Presentation {
     }
 }
 
+pub struct RenderableAdder {
+    additions: Vec<RenderableWrapper>
+}
+
+impl RenderableAdder {
+    pub(self) fn new() -> Self {
+        Self { additions: Vec::new() }
+    }
+
+    pub fn add<R: RenderableObjectSafe>(&mut self, renderable: R) {
+        self.additions.push(RenderableWrapper::new_boxed(Box::new(renderable) as Box<_>));
+    }
+
+    pub(self) fn move_additions(&mut self, list: &mut Vec<RenderableWrapper>) {
+        list.append(&mut self.additions);
+    }
+}
+
 impl Slide {
     pub fn new() -> Self {
         Self { renderables: Vec::new() }
     }
 
     pub fn from_parseable(parseable: parse::ParseableSlide) -> anyhow::Result<Self> {
+        let mut renderables: Vec<RenderableWrapper> = parseable.renderables.into_iter().enumerate().map(|(i, p)| {
+            use property::{ Property, PropertyValue };
+            
+            let rend_type_prop = p.get("type").ok_or(anyhow::anyhow!("'type' property of renderable #{} not specified!", i+1))?;
+            let rend_type = if let Property::Constant(PropertyValue::String(ref s)) = &*rend_type_prop {
+                s.clone()
+            } else {
+                anyhow::bail!("'type' property of renderable #{} isn't of type String!", i+1)
+            };
+            drop(rend_type_prop);
+
+            let renderable = (
+                    renderable::RENDERABLES.get(rend_type.as_str())
+                    .ok_or(anyhow::anyhow!("No renderable of type '{rend_type}' exists!"))?
+                )(p).map_err(|e| anyhow::anyhow!("Error creating renderable of type '{rend_type}': {e}"))?;
+
+            Ok(RenderableWrapper::new_boxed(renderable))
+        }).try_collect()?;
+
+        let mut adder = RenderableAdder::new();
+
+        for renderable in renderables.iter_mut() {
+            renderable.add_cascading_renderables(&mut adder)?;
+        }
+
+        adder.move_additions(&mut renderables);
+
         Ok(Self {
-            renderables: parseable.renderables.into_iter().enumerate().map(|(i, p)| {
-                use property::{ Property, PropertyValue };
-                
-                let rend_type_prop = p.get("type").ok_or(anyhow::anyhow!("'type' property of renderable #{} not specified!", i+1))?;
-                let rend_type = if let Property::Constant(PropertyValue::String(ref s)) = &*rend_type_prop {
-                    s.clone()
-                } else {
-                    anyhow::bail!("'type' property of renderable #{} isn't of type String!", i+1)
-                };
-                drop(rend_type_prop);
-
-                let renderable = (
-                        renderable::RENDERABLES.get(rend_type.as_str())
-                        .ok_or(anyhow::anyhow!("No renderable of type '{rend_type}' exists!"))?
-                    )(p).map_err(|e| anyhow::anyhow!("Error creating renderable of type '{rend_type}': {e}"))?;
-
-                Ok(RenderableWrapper::new_boxed(renderable))
-            }).try_collect()?
+            renderables
         })
     }
 
@@ -232,5 +260,9 @@ impl RenderableWrapper {
             log::warn!("No rendering manager for renderable!");
             anyhow::bail!("No rendering manager for renderable!")
         }
+    }
+
+    pub(self) fn add_cascading_renderables(&mut self, adder: &mut RenderableAdder) -> anyhow::Result<()> {
+        self.renderable.add_cascading_renderables(adder)
     }
 }

@@ -41,6 +41,9 @@ pub trait Renderable: std::fmt::Debug {
     where Self: Sized + 'static {
         Self::from_parseable(parseable).map(|s| Box::new(s) as Box<dyn RenderableObjectSafe>)
     }
+
+    #[allow(unused_variables)]
+    fn add_cascading_renderables(&mut self, adder: &mut super::RenderableAdder) -> anyhow::Result<()> { Ok(()) }
 }
 
 pub trait RenderableRenderingManager {

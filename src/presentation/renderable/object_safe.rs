@@ -15,6 +15,8 @@ pub trait RenderableObjectSafe: Downcast + std::fmt::Debug {
     fn to_parseable(&self) -> anyhow::Result<ParseableRenderable<'static>>;
 
     fn get_type(&self) -> TypeId;
+
+    fn add_cascading_renderables(&mut self, adder: &mut super::super::RenderableAdder) -> anyhow::Result<()>;
 }
 impl_downcast!(RenderableObjectSafe);
 
@@ -36,6 +38,10 @@ impl<T: Renderable + 'static> RenderableObjectSafe for T {
     }
 
     fn get_type(&self) -> TypeId { TypeId::of::<T>() }
+
+    fn add_cascading_renderables(&mut self, adder: &mut super::super::RenderableAdder) -> anyhow::Result<()> {
+        <Self as Renderable>::add_cascading_renderables(self, adder)
+    }
 }
 
 impl<T: RenderableRenderingManager> RenderableRenderingManagerObjectSafe for T

@@ -13,10 +13,10 @@ use crate::util::{ hashmap_ext::HashMapExt, math };
 
 #[derive(Debug)]
 pub struct Rectangle<'lua> {
-    base_properties: BaseProperties,
-    size: TypedProperty<'lua, (f64, f64)>,
-    corner_rounding: TypedProperty<'lua, properties::ContextualList<'lua, f64, 4>>,
-    texture: RectangleTextureType<'lua>,
+    pub base_properties: BaseProperties,
+    pub size: TypedProperty<'lua, (f64, f64)>,
+    pub corner_rounding: TypedProperty<'lua, properties::ContextualList<'lua, f64, 4>>,
+    pub texture: RectangleTextureType<'lua>,
 }
 
 #[derive(Debug)]
