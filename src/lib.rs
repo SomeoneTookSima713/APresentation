@@ -1,7 +1,7 @@
 #![allow(incomplete_features)]
 #![feature(min_specialization)]
 #![feature(maybe_uninit_array_assume_init, const_maybe_uninit_array_assume_init)]
-#![feature(const_float_bits_conv, const_swap, const_mut_refs, const_trait_impl, const_maybe_uninit_write)]
+#![feature(const_swap, const_mut_refs, const_trait_impl, const_maybe_uninit_write)]
 #![feature(generic_arg_infer)]
 #![feature(exclusive_wrapper)]
 #![feature(let_chains)]
@@ -14,7 +14,6 @@
 #![feature(const_intrinsic_copy)]
 #![feature(coerce_unsized)]
 #![feature(iterator_try_reduce)]
-#![feature(entry_insert)]
 
 use winit::dpi::PhysicalSize;
 use winit::event::{ WindowEvent, KeyEvent, ElementState };
@@ -49,6 +48,14 @@ pub struct BaseState<'a> {
 
 impl<'a> BaseState<'a> {
     async fn new(window: Window) -> anyhow::Result<BaseState<'a>> {
+        crate::presentation::renderable::text::markdown::Parser::parse(r#"
+# Title
+
+This is a markdown snippet, *intended for testing purposes*.
+
+This snippet aims to *test* markdown's **capabilities** and how to use it ***in Rust***.
+        "#);
+
         let window_arc = Arc::new(window);
 
         // The instance is a handle to our GPU
@@ -80,9 +87,6 @@ impl<'a> BaseState<'a> {
 
         let surface_caps = surface.get_capabilities(&adapter);
 
-        // Shader code in this tutorial assumes an sRGB surface texture. Using a different
-        // one will result in all the colors coming out darker. If you want to support non
-        // sRGB surfaces, you'll need to account for that when drawing to the frame.
         let surface_format = surface_caps.formats.iter()
             .copied()
             .filter(|f| f.eq(&wgpu::TextureFormat::Rgba8UnormSrgb))
@@ -124,11 +128,6 @@ impl<'a> BaseState<'a> {
         let win_size = window_arc.inner_size();
 
         let presentation_state = presentation::state::PresentationState::new(&device, &queue, win_size, &config)?;
-
-        // presentation::resource_managers::TEXTURE_MANAGER.insert(
-        //     "test".to_string(),
-        //     Arc::new(texture::Texture::from_image(&device, &queue, "test.jpeg", texture::TextureSamplerSelection::Linear, None)?)
-        // )?;
 
         Ok(Self {
             surface,

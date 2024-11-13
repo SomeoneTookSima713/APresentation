@@ -1,6 +1,5 @@
 pub mod consts;
 pub mod hashable_value;
-pub mod atomic_vec;
 pub mod fallible_app_handler;
 pub mod hashmap_ext;
 pub mod lua_helper;
@@ -89,40 +88,8 @@ impl<'a, 'lua, T: lua_helper::IntoLuaObjectSafe<'lua> + ?Sized> DynSlice<'a, T> 
     }
 }
 
-pub trait FontDBSourceExt {
-    fn with_data<P, T>(&self, p: P) -> Option<T>
-    where
-        P: FnOnce(&[u8]) -> T;
-    
-    fn get_data(&self) -> Option<Vec<u8>> {
-        self.with_data(|d| Vec::from(d))
-    }
-}
-
-impl FontDBSourceExt for fontdb::Source {
-    /// Copied from the internally used function which for some reason isn't public.
-    /// 
-    /// (Like seriously, the [`Database::with_face_data()`](fontdb::Database::with_face_data()) function, which uses this exact function, actually clones the data beforehand, making this whole closure thing completely useless as you could also just return the cloned data directly)
-    fn with_data<P, T>(&self, p: P) -> Option<T>
-    where
-        P: FnOnce(&[u8]) -> T,
-        {
-        use fontdb::Source;
-        match &self {
-            Source::File(ref path) => {
-                let file = std::fs::File::open(path).ok()?;
-                let data = unsafe { &memmap2::MmapOptions::new().map(&file).ok()? };
-
-                Some(p(data))
-            }
-            Source::Binary(ref data) => Some(p(data.as_ref().as_ref())),
-            Source::SharedFile(_, ref data) => Some(p(data.as_ref().as_ref())),
-        }
-    }
-}
-
 pub struct OwnedParsedFace {
-    face: ttf_parser::Face<'static>,
+    face: std::mem::ManuallyDrop<ttf_parser::Face<'static>>,
     orig_len: usize,
     orig_cap: usize,
     orig_data_ref: &'static [u8],
@@ -135,7 +102,7 @@ impl OwnedParsedFace {
         let orig_cap = data.capacity();
         let leaked_data = &*data.leak();
 
-        let face = ttf_parser::Face::parse(leaked_data, index)?;
+        let face = std::mem::ManuallyDrop::new(ttf_parser::Face::parse(leaked_data, index)?);
 
         Ok(Self { face, orig_len, orig_cap, orig_data_ref: leaked_data, face_index: index })
     }
@@ -157,6 +124,23 @@ impl std::ops::DerefMut for OwnedParsedFace {
 
 impl Drop for OwnedParsedFace {
     fn drop(&mut self) {
+        unsafe { std::mem::ManuallyDrop::drop(&mut self.face) };
         drop(unsafe { Vec::from_raw_parts(self.orig_data_ref.as_ptr() as *mut u8, self.orig_len, self.orig_cap) });
     }
+}
+
+pub type ArcVec<T> = Vec<std::sync::Arc<T>>;
+pub type ArcHashmap<K, V> = hashbrown::HashMap<K, std::sync::Arc<V>>;
+
+pub fn get_font_source_from_query(db: &fontdb::Database, query: &fontdb::Query) -> Option<(Vec<u8>, u32)> {
+    use fontdb::Source;
+    
+    Some(match db.face_source(db.query(query)?)? {
+        (Source::Binary(d), index) => (d.as_ref().as_ref().to_vec(), index),
+        (Source::File(p), index) => (std::fs::read(p).ok()?, index),
+        // This uses a memory-mapped file, which is inherently unsafe. Since we
+        // don't want to accidentally use this data for long periods of time,
+        // it gets copied here.
+        (Source::SharedFile(_, d), index) => (d.as_ref().as_ref().iter().copied().collect::<Vec<u8>>(), index)
+    })
 }

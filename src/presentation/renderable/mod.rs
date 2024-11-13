@@ -176,5 +176,6 @@ pub static RENDERABLES: Lazy<HashMap<String, fn(ParseableRenderable<'static>) ->
 });
 
 crate::util::macros::renderable::renderables!(
-    "Rect" => rect::Rectangle
+    "Rect" => rect::Rectangle,
+    // "Text" => text::Text,
 );

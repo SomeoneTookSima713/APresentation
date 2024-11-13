@@ -1,5 +1,14 @@
+const MARKDOWN: &'static str = r#"
+* Item 1
+* Item 2
+* **Third** item with *italics* and **boldness**
+* Fourth item with `code`
+"#;
+
 fn main() -> anyhow::Result<()> {
     init_logger();
+
+    apresentation::presentation::renderable::text::markdown::Parser::parse(MARKDOWN);
 
     pollster::block_on(apresentation::run())
 }

@@ -18,7 +18,7 @@ use crate::presentation::property::{
 };
 use crate::render::font::Font;
 
-mod markdown;
+pub mod markdown;
 
 bitflags::bitflags! {
     struct SyntheticStyle: u8 {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::presentation::resource_managers::FONT_MANAGER;
-use crate::util::{ FontDBSourceExt, OwnedParsedFace };
+use crate::util::OwnedParsedFace;
 
 #[derive(Clone)]
 pub struct Font {
@@ -11,20 +11,15 @@ pub struct Font {
 }
 
 impl Font {
-    pub fn from_id(id: fontdb::ID) -> anyhow::Result<Self> {
+    pub fn from_data(data: Vec<u8>, index: u32) -> anyhow::Result<Self> {
         use ab_glyph::Font;
 
-        let face = FONT_MANAGER.get_database().face(id).ok_or(anyhow::anyhow!("No font with specified ID exists!"))?;
-        let source = face.source.get_data().ok_or(anyhow::anyhow!("Font source couldn't be loaded!"))?;
+        let parsed_info = Arc::new(OwnedParsedFace::parse(data.clone(), index)?);
 
-        let parsed_info = Arc::new(OwnedParsedFace::parse(source.clone(), face.index)?);
-
-        let render_font = ab_glyph::FontArc::new(ab_glyph::FontVec::try_from_vec_and_index(source, face.index)?);
+        let render_font = ab_glyph::FontArc::new(ab_glyph::FontVec::try_from_vec_and_index(data.clone(), index)?);
         
-        let layout_font = harfbuzz_rs::Font::new(harfbuzz_rs::Face::new(render_font.font_data().to_vec(), face.index)).to_shared();
+        let layout_font = harfbuzz_rs::Font::new(harfbuzz_rs::Face::new(data, index)).to_shared();
 
         Ok(Self { render_font, layout_font, parsed_info })
     }
-
-    
 }

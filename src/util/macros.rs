@@ -24,7 +24,7 @@ pub mod resource {
 
 pub mod renderable {
     macro_rules! renderables {
-        ($($name:literal => $rend:ty),*) => {
+        ($($name:literal => $rend:ty),*$(,)?) => {
             pub fn register_renderables(hm: &mut HashMap<String, fn(ParseableRenderable<'static>) -> anyhow::Result<Box<dyn RenderableObjectSafe>>>) {
                 // crate::util::macros::renderable::int_renderable!($($name => $variadic),*);
                 $(hm.insert($name.to_string(), <$rend>::from_parseable_boxed);)*

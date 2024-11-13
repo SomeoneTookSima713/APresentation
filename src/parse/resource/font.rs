@@ -3,9 +3,28 @@ use super::*;
 #[derive(Debug)]
 pub struct Font(Rc<String>);
 
+fn load_fonts_recursively<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<()> {
+    for f in std::fs::read_dir(path.as_ref())? {
+        let file = f?;
+        let file_path = file.path();
+        if file.metadata()?.is_dir() {
+            load_fonts_recursively(file_path)?;
+        } else {
+            if let Err(e) = crate::presentation::resource_managers::FONT_MANAGER.load_font(&file_path) {
+                log::warn!("Error loading font at path {file_path:?}: {e}");
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Resource for Font {
     fn load(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> anyhow::Result<()> {
-        todo!();
+        if std::fs::metadata(self.0.as_ref())?.is_dir() {
+            load_fonts_recursively(self.0.as_ref())?;
+        } else {
+            crate::presentation::resource_managers::FONT_MANAGER.load_font(self.0.as_ref())?;
+        }
 
         Ok(())
     }

@@ -3,6 +3,10 @@ name = "apresentation"
 version = "0.1.0"
 edition = "2021"
 
+[profile.flamegraph]
+inherits = "release"
+debug = true
+
 [dependencies]
 # Rendering stuff
 wgpu = "22.1" # Rendering backend used for everything
@@ -27,6 +31,7 @@ dynstack = "0.4" # Provides a way to store a list of trait objects without an ex
 downcast-rs = "1.2" # Macro allowing implementing a `downcast` function on custom traits, not needing `Any` for it anymore
 bitflags = "2.6" # Macro for creating bitflags
 xxhash-rust = { version = "0.8", features = ["xxh3", "const_xxh3"] } # Very fast hashing algorithms
+hashbrown = "0.14"
 
 # Math and user-created expressions
 glam = "0.27" # Math library
@@ -39,11 +44,12 @@ try-iterator = "1"
 
 # Font parsing and text processing
 markdown-it = "0.6" # For parsing Markdown
+markdown-it-tasklist = "0.2"
 textwrap = { version = "0.16", features = ["smawk", "hyphenation"] } # For implementing text wrapping
 hyphenation = { version = "0.8", features = ["embed_all"] } # For implementing hyphenation of text while wrapping text
 whatlang = "0.16" # For automatically determining the language of a piece of text (for usage with `hyphenation`)
 memmap2 = "0.9" # For mapping files to memory (makes parsing font files faster)
-fontdb = "0.21.0" # For keeping track of loaded fonts and loading them as well (both from the user and the system)
+fontdb = "0.21" # For finding system fonts
 ttf-parser = "0.24" # For gathering information from a .ttf file
 harfbuzz_rs = "2" # For text shaping (finding out what characters go where)
 

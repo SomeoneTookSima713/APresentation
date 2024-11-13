@@ -1,0 +1,372 @@
+Node {
+    children: [
+Node {
+    children: [
+        Node {
+            children: [],
+            srcmap: Some(
+                (
+                    3,
+                    8,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+            node_value: Text {
+                content: "Title",
+            },
+        },
+    ],
+    srcmap: Some(
+        (
+            1,
+            8,
+        ),
+    ),
+    ext: NodeExtSet(
+        {},
+    ),
+    attrs: [],
+    node_type: markdown_it::plugins::cmark::block::heading::ATXHeading,
+    node_value: ATXHeading {
+        level: 1,
+    },
+},
+Node {
+    children: [
+        Node {
+            children: [],
+            srcmap: Some(
+                (
+                    10,
+                    38,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+            node_value: Text {
+                content: "This is a markdown snippet, ",
+            },
+        },
+        Node {
+            children: [
+                Node {
+                    children: [],
+                    srcmap: Some(
+                        (
+                            39,
+                            68,
+                        ),
+                    ),
+                    ext: NodeExtSet(
+                        {},
+                    ),
+                    attrs: [],
+                    node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+                    node_value: Text {
+                        content: "intended for testing purposes",
+                    },
+                },
+            ],
+            srcmap: Some(
+                (
+                    38,
+                    69,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::plugins::cmark::inline::emphasis::Em,
+            node_value: Em {
+                marker: '*',
+            },
+        },
+        Node {
+            children: [],
+            srcmap: Some(
+                (
+                    69,
+                    70,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+            node_value: Text {
+                content: ".",
+            },
+        },
+    ],
+    srcmap: Some(
+        (
+            10,
+            70,
+        ),
+    ),
+    ext: NodeExtSet(
+        {
+            markdown_it::generics::inline::emph_pair::OpenersBottom<'*'>: OpenersBottom(
+                [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+            ),
+        },
+    ),
+    attrs: [],
+    node_type: markdown_it::plugins::cmark::block::paragraph::Paragraph,
+    node_value: Paragraph,
+},
+Node {
+    children: [
+        Node {
+            children: [],
+            srcmap: Some(
+                (
+                    72,
+                    93,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+            node_value: Text {
+                content: "This snippet aims to ",
+            },
+        },
+        Node {
+            children: [
+                Node {
+                    children: [],
+                    srcmap: Some(
+                        (
+                            94,
+                            98,
+                        ),
+                    ),
+                    ext: NodeExtSet(
+                        {},
+                    ),
+                    attrs: [],
+                    node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+                    node_value: Text {
+                        content: "test",
+                    },
+                },
+            ],
+            srcmap: Some(
+                (
+                    93,
+                    99,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::plugins::cmark::inline::emphasis::Em,
+            node_value: Em {
+                marker: '*',
+            },
+        },
+        Node {
+            children: [],
+            srcmap: Some(
+                (
+                    99,
+                    111,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+            node_value: Text {
+                content: " markdown’s ",
+            },
+        },
+        Node {
+            children: [
+                Node {
+                    children: [],
+                    srcmap: Some(
+                        (
+                            113,
+                            125,
+                        ),
+                    ),
+                    ext: NodeExtSet(
+                        {},
+                    ),
+                    attrs: [],
+                    node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+                    node_value: Text {
+                        content: "capabilities",
+                    },
+                },
+            ],
+            srcmap: Some(
+                (
+                    111,
+                    127,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::plugins::cmark::inline::emphasis::Strong,
+            node_value: Strong {
+                marker: '*',
+            },
+        },
+        Node {
+            children: [],
+            srcmap: Some(
+                (
+                    127,
+                    146,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+            node_value: Text {
+                content: " and how to use it ",
+            },
+        },
+        Node {
+            children: [
+                Node {
+                    children: [
+                        Node {
+                            children: [],
+                            srcmap: Some(
+                                (
+                                    149,
+                                    156,
+                                ),
+                            ),
+                            ext: NodeExtSet(
+                                {},
+                            ),
+                            attrs: [],
+                            node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+                            node_value: Text {
+                                content: "in Rust",
+                            },
+                        },
+                    ],
+                    srcmap: Some(
+                        (
+                            219,
+                            230,
+                        ),
+                    ),
+                    ext: NodeExtSet(
+                        {},
+                    ),
+                    attrs: [],
+                    node_type: markdown_it::plugins::cmark::inline::emphasis::Strong,
+                    node_value: Strong {
+                        marker: '*',
+                    },
+                },
+            ],
+            srcmap: Some(
+                (
+                    146,
+                    159,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::plugins::cmark::inline::emphasis::Em,
+            node_value: Em {
+                marker: '*',
+            },
+        },
+        Node {
+            children: [],
+            srcmap: Some(
+                (
+                    159,
+                    160,
+                ),
+            ),
+            ext: NodeExtSet(
+                {},
+            ),
+            attrs: [],
+            node_type: markdown_it::parser::inline::builtin::skip_text::Text,
+            node_value: Text {
+                content: ".",
+            },
+        },
+    ],
+    srcmap: Some(
+        (
+            72,
+            160,
+        ),
+    ),
+    ext: NodeExtSet(
+        {
+            markdown_it::generics::inline::emph_pair::OpenersBottom<'*'>: OpenersBottom(
+                [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+            ),
+        },
+    ),
+    attrs: [],
+    node_type: markdown_it::plugins::cmark::block::paragraph::Paragraph,
+    node_value: Paragraph,
+},
+    ],
+    srcmap: Some(
+        (
+            0,
+            169,
+        ),
+    ),
+    ext: NodeExtSet(
+        {},
+    ),
+    attrs: [],
+    node_type: markdown_it::parser::core::root::Root,
+    node_value: Root {
+        content: "\n# Title\n\nThis is a markdown snippet, *intended for testing purposes*.\n\nThis snippet aims to *test* markdown's **capabilities** and how to use it ***in Rust***.\n        ",
+        ext: RootExtSet(
+            {
+                alloc::vec::Vec<markdown_it::plugins::extra::linkify::LinkifyPosition>: [],
+            },
+        ),
+    },
+}
