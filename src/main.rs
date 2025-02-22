@@ -1,3 +1,7 @@
+#![feature(hasher_prefixfree_extras)]
+#![feature(if_let_guard)]
+#![feature(box_into_inner)]
+
 use std::sync::Arc;
 
 use winit::window::Window;

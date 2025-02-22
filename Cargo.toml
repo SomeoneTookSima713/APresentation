@@ -13,6 +13,8 @@ pollster = "*"
 anyhow = "1.0"
 thiserror = "2.0"
 
+downcast-rs = "2.0"
+
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["ansi"] }
 
@@ -20,4 +22,4 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 ron = "0.8"
 
-rhai = "1.21"
+rhai = { version = "1.21", features = [ "internals" ] }
