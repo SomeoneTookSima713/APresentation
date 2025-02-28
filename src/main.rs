@@ -1,6 +1,8 @@
 #![feature(hasher_prefixfree_extras)]
 #![feature(if_let_guard)]
 #![feature(box_into_inner)]
+#![feature(array_try_from_fn)]
+#![feature(let_chains)]
 
 use std::sync::Arc;
 
