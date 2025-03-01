@@ -2,16 +2,18 @@ use crate::presentation::parser::data::Value;
 
 pub mod alignment;
 
+pub mod base;
+
 #[derive(Clone)]
 pub enum Property<T: PropertyCompatible> {
-    Literal(T),
+    Literal(T::InnerRepresentation),
     Script(rhai::AST)
 }
 
 impl<T: PropertyCompatible> Property<T> {
     pub fn evaluate(&self, scope: &mut rhai::Scope<'static>, engine: &rhai::Engine) -> Option<T> {
         match self {
-            Self::Literal(v) => Some(v.clone()),
+            Self::Literal(v) => Some(T::to_self(v, engine, scope)?),
             Self::Script(ast) => engine.eval_ast_with_scope::<T>(scope, ast).ok()
         }
     }
@@ -20,20 +22,34 @@ impl<T: PropertyCompatible> Property<T> {
     /// 
     /// It fails if the conversion of a concrete value didn't return anything
     /// or if rhai code was supplied and a parsing error occured.
+    #[tracing::instrument(skip(engine))]
     pub fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self> {
         match val {
-            Value::RhaiCode(c) => Some(Self::Script(engine.compile_expression(c).ok()?)),
-            v => Some(Self::Literal(T::from_value(v)?))
+            Value::RhaiCode(c) => Some(Self::Script(match engine.compile_expression(c) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!("Error compiling rhai code: {e}");
+                    None?
+                }
+            })),
+            v => Some(Self::Literal(T::from_value(v, engine)?))
         }
     }
 }
 
 pub trait PropertyCompatible: rhai::Variant + Clone {
+    type InnerRepresentation;
+
     /// Tries to convert from the generic [`Value`] enum to the more specific
-    /// implementor of this trait. This method doesn't need to handle
-    /// [`Value::RhaiCode`], because that is handled in
-    /// [`PropertyCompatible::from_value_or_rhai()`].
-    fn from_value(val: Value) -> Option<Self>
+    /// implementor of this trait. Contrary to the fact that a [`rhai::Engine`]
+    /// is supplied as an argument, this method doesn't normally need to handle
+    /// [`Value::RhaiCode`], because that is already handled in
+    /// [`Property::from_value()`]. Only if you need to convert additional
+    /// `Value`s you have to use it.
+    fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self::InnerRepresentation>
+    where Self: Sized;
+
+    fn to_self(base: &Self::InnerRepresentation, engine: &rhai::Engine, scope: &mut rhai::Scope<'static>) -> Option<Self>
     where Self: Sized;
 
     // This method shouldn't be necessary, but I'm keeping the code here just in case.
@@ -59,40 +75,51 @@ mod prop_comp_impls {
     use crate::presentation::parser::data::Value;
 
     macro_rules! impl_for_primitive {
-        ($prim:ty, $valty:tt) => {
+        ($prim:ty, $valty:tt $(, $($othervalty:tt),*)?) => {
             impl PropertyCompatible for $prim {
-                fn from_value(val: Value) -> Option<Self>
+                type InnerRepresentation = Self;
+
+                fn from_value(val: Value, _engine: &rhai::Engine) -> Option<Self>
                 where Self: Sized {
-                    if let Value::$valty(v) = val {
-                        Some(v as $prim)
-                    } else if let Value::Option(Some(boxv)) = val && let Value::$valty(v) = &*boxv {
-                        Some(*v as $prim)
-                    } else {
-                        None
+                    // I love doing cursed macro shenanigans :)
+                    match val {
+                        Value::$valty(v) => Some(v as $prim),
+                        $($( Value::$othervalty(v) => Some(v as $prim), )*)?
+                        Value::Option(Some(boxv)) => match &*boxv {
+                            Value::$valty(v) =>Some(*v as $prim),
+                            $($( Value::$othervalty(v) => Some(*v as $prim), )*)?
+                            _ => None
+                        },
+                        _ => None
                     }
                 }
+
+                fn to_self(base: &Self, _engine: &rhai::Engine, _scope: &mut rhai::Scope<'static>) -> Option<Self>
+                where Self: Sized { Some(*base) }
             }
         };
     }
 
-    impl_for_primitive!(u8, Int);
-    impl_for_primitive!(u16, Int);
-    impl_for_primitive!(u32, Int);
-    impl_for_primitive!(u64, Int);
-    impl_for_primitive!(u128, Int);
-    impl_for_primitive!(usize, Int);
-    impl_for_primitive!(i8, Int);
-    impl_for_primitive!(i16, Int);
-    impl_for_primitive!(i32, Int);
-    impl_for_primitive!(i64, Int);
-    impl_for_primitive!(i128, Int);
-    impl_for_primitive!(isize, Int);
-    impl_for_primitive!(f32, Float);
-    impl_for_primitive!(f64, Float);
+    impl_for_primitive!(u8, Int, Float);
+    impl_for_primitive!(u16, Int, Float);
+    impl_for_primitive!(u32, Int, Float);
+    impl_for_primitive!(u64, Int, Float);
+    impl_for_primitive!(u128, Int, Float);
+    impl_for_primitive!(usize, Int, Float);
+    impl_for_primitive!(i8, Int, Float);
+    impl_for_primitive!(i16, Int, Float);
+    impl_for_primitive!(i32, Int, Float);
+    impl_for_primitive!(i64, Int, Float);
+    impl_for_primitive!(i128, Int, Float);
+    impl_for_primitive!(isize, Int, Float);
+    impl_for_primitive!(f32, Int, Float);
+    impl_for_primitive!(f64, Int, Float);
     impl_for_primitive!(bool, Bool);
 
     impl PropertyCompatible for String {
-        fn from_value(val: Value) -> Option<Self>
+        type InnerRepresentation = Self;
+
+        fn from_value(val: Value, _engine: &rhai::Engine) -> Option<Self>
         where Self: Sized {
             if let Value::String(v) = val {
                 Some(v)
@@ -102,25 +129,40 @@ mod prop_comp_impls {
                 None
             }
         }
+
+        fn to_self(base: &Self, _engine: &rhai::Engine, _scope: &mut rhai::Scope<'static>) -> Option<Self>
+        where Self: Sized { Some(base.clone()) }
     }
 
     impl<T: PropertyCompatible> PropertyCompatible for Option<T> {
-        fn from_value(val: Value) -> Option<Self>
+        type InnerRepresentation = Option<super::Property<T>>;
+
+        fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self::InnerRepresentation>
         where Self: Sized {
             if let Value::Option(v) = val {
-                Some(v.and_then(|v| T::from_value(Box::into_inner(v))))
+                Some(match v {
+                    Some(v) => Some(super::Property::from_value(*v, engine)?),
+                    None => None
+                })
             } else {
-                None
+                Some(Some(super::Property::from_value(val, engine)?))
             }
+        }
+
+        fn to_self(base: &Self::InnerRepresentation, engine: &rhai::Engine, scope: &mut rhai::Scope<'static>) -> Option<Self>
+        where Self: Sized {
+            base.as_ref().map(|v| v.evaluate(scope, engine))
         }
     }
 
     impl<T: PropertyCompatible> PropertyCompatible for Vec<T> {
-        fn from_value(val: Value) -> Option<Self>
+        type InnerRepresentation = Vec<super::Property<T>>;
+
+        fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self::InnerRepresentation>
         where Self: Sized {
             if let Value::List(v) = val {
                 let mut vec = Vec::with_capacity(v.len());
-                let map = v.into_iter().map(|v| T::from_value(v));
+                let map = v.into_iter().map(|v| super::Property::from_value(v, engine));
                 for val in map {
                     if let Some(value) = val {
                         vec.push(value);
@@ -133,7 +175,7 @@ mod prop_comp_impls {
                 Some(vec)
             } else if let Value::Option(Some(boxv)) = val && let Value::List(v) = Box::into_inner(boxv) {
                 let mut vec = Vec::with_capacity(v.len());
-                let map = v.into_iter().map(|v| T::from_value(v));
+                let map = v.into_iter().map(|v| super::Property::from_value(v, engine));
                 for val in map {
                     if let Some(value) = val {
                         vec.push(value);
@@ -147,6 +189,11 @@ mod prop_comp_impls {
             } else {
                 None
             }
+        }
+
+        fn to_self(base: &Self::InnerRepresentation, engine: &rhai::Engine, scope: &mut rhai::Scope<'static>) -> Option<Self>
+        where Self: Sized {
+            base.iter().map(|p| p.evaluate(scope, engine)).try_collect()
         }
     }
 
@@ -161,32 +208,48 @@ mod prop_comp_impls {
     impl PropertyCompatible for Tuple {
         for_tuples!( where #( Tuple: PropertyCompatible )* );
 
-        fn from_value(val: Value) -> Option<Self>
+        for_tuples!( type InnerRepresentation = ( #(super::Property<Tuple>),* ); );
+
+        fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self::InnerRepresentation>
         where Self: Sized {
             if let Value::List(v) = val {
                 Some((for_tuples!(
-                    #( Tuple::from_value(v.get(TUPLE_TO_IDX.Tuple)?.clone())? ),*
+                    #( super::Property::from_value(v.get(TUPLE_TO_IDX.Tuple)?.clone(), engine)? ),*
                 )))
             } else if let Value::Option(Some(boxv)) = val && let Value::List(v) = Box::into_inner(boxv) {
                 Some((for_tuples!(
-                    #( Tuple::from_value(v.get(TUPLE_TO_IDX.Tuple)?.clone())? ),*
+                    #( super::Property::from_value(v.get(TUPLE_TO_IDX.Tuple)?.clone(), engine)? ),*
                 )))
             } else {
                 None
             }
         }
+
+        fn to_self(base: &Self::InnerRepresentation, engine: &rhai::Engine, scope: &mut rhai::Scope<'static>) -> Option<Self>
+        where Self: Sized {
+            Some((for_tuples!(
+                #( base.Tuple.evaluate(scope, engine)? ),*
+            )))
+        }
     }
 
     impl<T: PropertyCompatible, const N: usize> PropertyCompatible for [T; N] {
-        fn from_value(val: Value) -> Option<Self>
+        type InnerRepresentation = [super::Property<T>; N];
+
+        fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self::InnerRepresentation>
         where Self: Sized {
             if let Value::List(v) = val {
-                Some(std::array::try_from_fn(|i| T::from_value(v.get(i)?.clone()))?)
+                Some(std::array::try_from_fn(|i| super::Property::from_value(v.get(i)?.clone(), engine))?)
             } else if let Value::Option(Some(boxv)) = val && let Value::List(v) = Box::into_inner(boxv) {
-                Some(std::array::try_from_fn(|i| T::from_value(v.get(i)?.clone()))?)
+                Some(std::array::try_from_fn(|i| super::Property::from_value(v.get(i)?.clone(), engine))?)
             } else {
                 None
             }
+        }
+
+        fn to_self(base: &Self::InnerRepresentation, engine: &rhai::Engine, scope: &mut rhai::Scope<'static>) -> Option<Self>
+        where Self: Sized {
+            std::array::try_from_fn(|i| base[i].evaluate(scope, engine))
         }
     }
 }

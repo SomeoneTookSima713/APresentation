@@ -3,6 +3,7 @@
 #![feature(box_into_inner)]
 #![feature(array_try_from_fn)]
 #![feature(let_chains)]
+#![feature(iterator_try_collect)]
 
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use winit::window::Window;
 mod util;
 mod config;
 mod presentation;
+mod elements;
 
 use util::improved_app_handler::{ App, AppHandler };
 
@@ -116,6 +118,24 @@ impl AppHandler for APresentation {
             desired_maximum_frame_latency: 4
         };
 
+        // // Testing setup to test the parser
+        // let test_engine = rhai::Engine::new();
+
+        // use presentation::parser::{ Parser, impls::apres::ApresParser };
+
+        // let mut reg_elems = presentation::element::RegisteredElements::new();
+        // reg_elems.register_element::<elements::rect::Rect>("Rect".to_string());
+        // reg_elems.register_element_renderer::<elements::rect::RectRenderer>();
+
+        // let mut asset_manager = presentation::asset::AssetManager::new();
+        // asset_manager.register_asset_type::<elements::rect::Image>("image".to_string());
+        // let alp = presentation::asset::AssetLoadingParams {
+        //     gpu_device: device.clone(),
+        //     gpu_queue: queue.clone()
+        // };
+
+        // println!("{:?}", ApresParser::parse(std::fs::File::open("../test.apres")?, &reg_elems, &test_engine, &mut asset_manager, alp));
+
         Ok(APresentation {
             surface,
             adapter,
@@ -194,6 +214,12 @@ fn main() -> anyhow::Result<()> {
             .with_level(true)
             .with_thread_names(true)
             .with_target(true)
+            .with_max_level({
+                #[cfg(debug_assertions)]
+                {tracing::Level::DEBUG}
+                #[cfg(not(debug_assertions))]
+                {tracing::Level::INFO}
+            })
             .pretty()
             .finish()
     ).expect("Couldn't initialize logger!");

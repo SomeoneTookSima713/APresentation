@@ -1,8 +1,9 @@
 use hashbrown::HashMap;
 
 use crate::presentation::element::property::{ Property, PropertyCompatible };
+use crate::presentation::element::property::base::BaseProperties;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -82,18 +83,32 @@ impl Value {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ParsedStructure(HashMap<String, Value>);
 
 impl ParsedStructure {
     pub fn new(map: HashMap<String, Value>) -> Self { Self(map) }
 
-    pub fn try_get_property<T: PropertyCompatible, S: std::hash::Hash + hashbrown::Equivalent<String> + ?Sized>(&self, idx: &S, engine: &rhai::Engine) -> Option<Property<T>> {
+    pub fn try_get_property<'a, T: PropertyCompatible, S>(&self, idx: &'a S, engine: &rhai::Engine) -> anyhow::Result<Property<T>>
+    where
+        String: std::borrow::Borrow<S>,
+        S: std::hash::Hash + hashbrown::Equivalent<String> + ?Sized,
+        &'a S: ToString
+    {
         if let Some(v) = self.0.get(idx) {
-            Property::from_value(v.clone(), engine)
+            Property::from_value(v.clone(), engine).ok_or(anyhow::anyhow!("Conversion to type '{}' failed for property '{}'!", std::any::type_name::<T>(), idx.to_string()))
         } else {
-            None
+            anyhow::bail!("Value at index '{}' not found!", idx.to_string())
         }
+    }
+
+    pub fn try_get_base_properties(&self, engine: &rhai::Engine) -> anyhow::Result<BaseProperties> {
+        Ok(BaseProperties {
+            position: self.try_get_property("position", engine)?,
+            anchor: self.try_get_property("anchor", engine)?,
+            alignment: self.try_get_property("alignment", engine)?,
+            z_index: self.try_get_property("z_index", engine)?
+        })
     }
 
     pub fn inner(&self) -> &HashMap<String, Value> { &self.0 }

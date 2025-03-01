@@ -5,42 +5,32 @@ use std::any::TypeId;
 use crate::presentation::parser::data::ParsedStructure;
 
 pub mod property;
-pub mod elements;
 
-pub use elements::*;
+pub use crate::elements::*;
 
 /// The main trait of this module.
 /// 
 /// An [`Element`] describes an object that gets rendered onto the screen.
-pub trait Element {
+pub trait Element: property::base::BasePropertiesProvider {
     type Renderer: ElementRenderer;
 
-    fn from_structure(structure: ParsedStructure, engine: &rhai::Engine) -> Option<Self>
+    fn from_structure(structure: ParsedStructure, engine: &rhai::Engine) -> anyhow::Result<Self>
     where Self: Sized;
 }
 
 /// *For internal use only!*
 /// 
-/// An dyn-safe variant of the [`Element`] trait that is automatically
+/// An dyn-safe marker for the [`Element`] trait that is automatically
 /// implemented by any type implementing `Element`.
-pub trait ElemObjS: downcast_rs::Downcast {
-    fn renderer_tid(&self) -> TypeId;
-
-    fn from_structure(structure: ParsedStructure, engine: &rhai::Engine) -> Option<Self>
-    where Self: Sized;
-}
+pub trait ElemObjS: downcast_rs::Downcast {}
 downcast_rs::impl_downcast!(ElemObjS);
-
-impl<T: Element + 'static> ElemObjS for T {
-    fn renderer_tid(&self) -> TypeId {
-        TypeId::of::<T::Renderer>()
-    }
-
-    fn from_structure(structure: ParsedStructure, engine: &rhai::Engine) -> Option<Self>
-    where Self: Sized {
-        <Self as Element>::from_structure(structure, engine)
+impl std::fmt::Debug for dyn ElemObjS {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "dyn ElemObjS")
     }
 }
+
+impl<T: Element + 'static> ElemObjS for T {}
 
 pub trait ElementRenderer {
     type Element: Element<Renderer = Self> + 'static;
@@ -101,7 +91,7 @@ impl<T: ElementRenderer + 'static> ElemRendObjS for T {
 /// `&self`.
 pub struct RegisteredElement {
     pub renderer_type_id: TypeId,
-    constructor_fn: Box<dyn for<'a> Fn(ParsedStructure, &'a rhai::Engine) -> Option<Box<dyn ElemObjS>>>
+    constructor_fn: Box<dyn for<'a> Fn(ParsedStructure, &'a rhai::Engine) -> anyhow::Result<Box<dyn ElemObjS>>>
 }
 
 /// Basically a custom v-table for the [`ElementRenderer`] struct because Rust doesn't
@@ -112,7 +102,7 @@ impl RegisteredElement {
         Self { renderer_type_id: TypeId::of::<T::Renderer>(), constructor_fn: Box::new(|s, e| T::from_structure(s, e).map(|s| Box::new(s) as Box<dyn ElemObjS>)) }
     }
 
-    pub fn construct(&self, parsed_structure: ParsedStructure, engine: &rhai::Engine) -> Option<Box<dyn ElemObjS>> {
+    pub fn construct(&self, parsed_structure: ParsedStructure, engine: &rhai::Engine) -> anyhow::Result<Box<dyn ElemObjS>> {
         (self.constructor_fn)(parsed_structure, engine)
     }
 }
@@ -153,6 +143,10 @@ pub struct RegisteredElements {
 }
 
 impl RegisteredElements {
+    pub fn new() -> Self {
+        Self { element_types: hashbrown::HashMap::new(), element_renderer: hashbrown::HashMap::new() }
+    }
+
     pub fn register_element<T: Element + 'static>(&mut self, ident: String) {
         self.element_types.insert(ident, RegisteredElement::new::<T>());
     }

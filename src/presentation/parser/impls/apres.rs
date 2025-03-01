@@ -7,6 +7,7 @@ use hashbrown::HashMap;
 use crate::util::structural_eq;
 use crate::presentation::parser::data::{ ParsedStructure, Value };
 use crate::presentation::element::RegisteredElements;
+use crate::presentation::asset::{ AssetManager, AssetLoadingParams };
 use crate::presentation::{ ElementID, PresentationState };
 use super::{ Parser, ParserError };
 
@@ -139,7 +140,7 @@ struct FileLocation {
 }
 
 pub struct ApresParser<'a> {
-    file: &'a String,
+    file: &'a str,
     iter: Peekable<Enumerate<Chars<'a>>>,
     tokens: Vec<Token<'a>>,
     token_locations: Vec<FileLocation>,
@@ -147,7 +148,7 @@ pub struct ApresParser<'a> {
 }
 
 impl<'a> ApresParser<'a> {
-    fn new(file: &'a String) -> Self {
+    fn new(file: &'a str) -> Self {
         Self {
             file,
             iter: file.chars().enumerate().peekable(),
@@ -187,7 +188,6 @@ impl<'a> ApresParser<'a> {
                 Token::Literal(Literal::Number(n2)),
                 Token::Punctuation(Punctuation::Comma),
                 Token::Literal(Literal::Number(n3)),
-                Token::Punctuation(Punctuation::Comma),
                 Token::Punctuation(Punctuation::ClosingParen)
             ] => Some([ n1.parse().ok()?, n2.parse().ok()?, n3.parse().ok()? ]),
             _ => None
@@ -401,7 +401,7 @@ impl<'a> ApresParser<'a> {
                         },
                         "slide" => Command::Slide(
                             command_literal.take().unwrap(),
-                            Self::parse_tokens_to_color(&self.tokens[command_element_tokens_start.take().unwrap()..=i])
+                            Self::parse_tokens_to_color(&self.tokens[command_element_tokens_start.take().unwrap()+1..=i])
                                 .ok_or(ast::ParserError::new(self.token_locations[i], ParserErrorKind::UnexpectedToken(*token)))?
                         ),
                         _ => unreachable!()
@@ -439,6 +439,7 @@ impl<'a> ApresParser<'a> {
         None
     }
 
+    #[tracing::instrument]
     fn parse_map_value_from_tokens(tokens: &'a [Token<'a>], token_amount: usize) -> Result<HashMap<String, Value>, ParserError> {
         let mut map = HashMap::new();
         let mut token_ind = 1;
@@ -447,8 +448,8 @@ impl<'a> ApresParser<'a> {
             let mut traversed_tokens = 0;
 
             // Makes code more readable by long code snippets
-            macro_rules! gt { () => { tokens.get(token_ind + traversed_tokens) }; }
-            macro_rules! err { ($($msg:tt)*) => { return Err(ParserError::ValueCreationError(anyhow::anyhow!($($msg)*))) }; }
+            macro_rules! gt { () => {{ tracing::debug!("Getting token at index {} + {}", token_ind, traversed_tokens); tokens.get(token_ind + traversed_tokens) }}; }
+            macro_rules! err { ($($msg:tt)*) => { {tracing::error!($($msg)*); return Err(ParserError::ValueCreationError(anyhow::anyhow!($($msg)*))) }} }
 
             let ident;
             if let Token::Identifier(id) = token {
@@ -549,7 +550,7 @@ impl<'a> ApresParser<'a> {
                 Ok(Value::EnumVariant(ident.to_string(), enum_value))
             },
             // Map
-            Token::Punctuation(Punctuation::OpeningBrace) => Ok(Value::Map(Self::parse_map_value_from_tokens(&tokens[1..], token_amount)?)),
+            Token::Punctuation(Punctuation::OpeningBrace) => Ok(Value::Map(Self::parse_map_value_from_tokens(&tokens[..], token_amount)?)),
             Token::Punctuation(Punctuation::OpeningParen | Punctuation::OpeningBracket) => { // List/Tuple (they're the same as a Value)
                 let mut list = Vec::new();
                 let mut token_ind = 1;
@@ -580,11 +581,44 @@ impl<'a> ApresParser<'a> {
 impl Parser for ApresParser<'static> {
     const FILE_EXTENSIONS: &[&str] = &[ "apres" ];
 
-    fn parse(mut file: impl std::io::Read, registered_elements: &RegisteredElements, engine: &rhai::Engine) -> Result<Vec<PresentationState>, ParserError> {
-        let mut string = String::new();
-        file.read_to_string(&mut string)?;
+    fn parse(
+        mut file: impl std::io::Read,
+        registered_elements: &RegisteredElements,
+        engine: &rhai::Engine,
+        asset_manager: &mut AssetManager,
+        asset_loading_params: AssetLoadingParams,
+    ) -> Result<Vec<PresentationState>, ParserError> {
+        let mut string_full = String::new();
+        file.read_to_string(&mut string_full)?;
+        let (asset_string, apres_string) = match string_full.split_once("\n---\n").or_else(|| string_full.split_once("\r\n---\r\n")) {
+            Some(v) => v,
+            None => ("", string_full.as_str())
+        };
 
-        let mut parser = ApresParser::new(&string);
+        let asset_table: toml::Table = toml::from_str(asset_string)?;
+
+        for (k, v) in asset_table.iter() {
+            let type_id;
+            if let Some(tid) = asset_manager.get_asset_type_from_name(k) {
+                type_id = tid;
+            } else {
+                return Err(ParserError::AssetError(crate::presentation::asset::AssetLoadError::ParsingError(anyhow::anyhow!("Couldn't find asset type '{k}'!"))));
+            }
+
+            if let toml::Value::Array(vec) = v {
+                for val in vec.iter() {
+                    if let toml::Value::Table(t) = val {
+                        asset_manager.load_asset_dyn(type_id, t.clone(), asset_loading_params.clone())?;
+                    } else {
+                        tracing::warn!("Invalid asset list formatting, value of asset type array element isn't a table!");
+                    }
+                }
+            } else {
+                tracing::warn!("Invalid asset list formatting, value of asset type isn't an array!");
+            }
+        }
+
+        let mut parser = ApresParser::new(apres_string);
 
         parser.parse_to_tokens().map_err(|e| ParserError::TokenizerError(anyhow::anyhow!(e)))?;
         parser.parse_to_ast().map_err(|e| ParserError::GenericError(anyhow::anyhow!("{}", e)))?;
@@ -618,6 +652,8 @@ impl Parser for ApresParser<'static> {
 
                     let parsed_struct = ParsedStructure::new(ApresParser::parse_map_value_from_tokens(&value_struct[1..], value_struct.len())?);
 
+                    tracing::debug!("Parsed struct: {parsed_struct:?}");
+
                     if ident.is_some() {
                         let ind = format!("{current_state_name}::{}", ident.as_ref().unwrap());
                         state_element_structures.insert(ind.clone(), parsed_struct.clone());
@@ -626,10 +662,9 @@ impl Parser for ApresParser<'static> {
 
                     if let Some(e) = registered_elements.element_types.get(elem_type) {
                         let boxed_elem;
-                        if let Some(e) = e.construct(parsed_struct, engine) {
-                            boxed_elem = e;
-                        } else {
-                            return Err(ParserError::GenericError(anyhow::anyhow!("Element creation failed!")));
+                        match e.construct(parsed_struct, engine) {
+                            Ok(e) => boxed_elem = e,
+                            Err(e) => return Err(ParserError::GenericError(anyhow::anyhow!("Element creation failed: {e}")))
                         }
                         current_state.as_mut().unwrap().new_elements.insert(id, Rc::from(boxed_elem));
                     } else {
@@ -639,7 +674,7 @@ impl Parser for ApresParser<'static> {
                 Command::ModifyElem { ident, value_struct } => {
                     let id = ElementID::Custom(ident.to_string());
 
-                    let parsed_struct_overlay = ParsedStructure::new(ApresParser::parse_map_value_from_tokens(&value_struct[1..], value_struct.len())?);
+                    let parsed_struct_overlay = ParsedStructure::new(ApresParser::parse_map_value_from_tokens(&value_struct[..], value_struct.len())?);
 
                     let mut parsed_struct;
                     if let Some(s) = state_element_structures.get(ident) {
@@ -656,10 +691,9 @@ impl Parser for ApresParser<'static> {
                     let elem_type = state_element_types.get(ident).unwrap();
                     if let Some(e) = registered_elements.element_types.get(elem_type) {
                         let boxed_elem;
-                        if let Some(e) = e.construct(parsed_struct, engine) {
-                            boxed_elem = e;
-                        } else {
-                            return Err(ParserError::GenericError(anyhow::anyhow!("Element creation failed!")));
+                        match e.construct(parsed_struct, engine) {
+                            Ok(e) => boxed_elem = e,
+                            Err(e) => return Err(ParserError::GenericError(anyhow::anyhow!("Element creation failed: {e}")))
                         }
                         current_state.as_mut().unwrap().removed_elements.push(ElementID::Custom(ident.clone()));
                         current_state.as_mut().unwrap().new_elements.insert(id, Rc::from(boxed_elem));

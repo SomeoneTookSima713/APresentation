@@ -4,10 +4,11 @@ use hashbrown::HashMap;
 
 pub mod parser;
 pub mod element;
+pub mod asset;
 
 type RcElement = Rc<dyn element::ElemObjS>;
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum ElementID {
     Custom(String),
     Generated(u64)
@@ -24,11 +25,12 @@ impl std::hash::Hash for ElementID {
 
 pub struct Presentation {
     states: HashMap<String, PresentationState>,
+    assets: asset::AssetManager,
     curr_state_idx: usize,
     curr_state: ActivePresState
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PresentationState {
     pub background_color: [f64; 3],
     pub removed_elements: Vec<ElementID>,
