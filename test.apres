@@ -8,6 +8,7 @@ slide "MySlide" (1.0, 1.0, 1.0)
 // This creates a new Rect element
 newelem "ColorRect" Rect (
     position: (100, Rhai("h * 0.5")),
+    size: ("0.5*w", 200),
     anchor: TopRight,
     alignment: MidRight,
     source: Color(1.0, 0.5, 0.0, 1.0),

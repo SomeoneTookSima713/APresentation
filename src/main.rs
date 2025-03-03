@@ -18,6 +18,21 @@ use util::improved_app_handler::{ App, AppHandler };
 
 const CONFIG_PATH: &str = "config.toml";
 
+pub struct PushConstantManager(std::sync::atomic::AtomicU32);
+/// Use the methods on this static's type in your element renderer's init
+/// function if you need to use push constants. This static ensures that no two
+/// [`ElementRenderer`](presentation::element::ElementRenderer)s overlap
+/// eachother in their push constant ranges.
+pub static PUSH_CONSTANT_MANAGER: PushConstantManager = PushConstantManager(std::sync::atomic::AtomicU32::new(0));
+impl PushConstantManager {
+    pub fn get_range(&self, size: u32) -> std::ops::Range<u32> {
+        use std::sync::atomic::Ordering;
+
+        let val = self.0.fetch_add(size, Ordering::SeqCst);
+        val..val+size
+    }
+}
+
 struct APresentation {
     surface: wgpu::Surface<'static>,
     adapter: wgpu::Adapter,
@@ -82,7 +97,7 @@ impl AppHandler for APresentation {
 
                 score += match adapter.get_info().backend {
                     wgpu::Backend::Vulkan => 1,
-                    wgpu::Backend::Metal => 2,
+                    wgpu::Backend::Metal => -1,
                     _ => 0
                 };
 
@@ -94,7 +109,11 @@ impl AppHandler for APresentation {
 
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::empty(),
+                required_features:
+                    wgpu::Features::TEXTURE_BINDING_ARRAY |
+                    wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
+                    wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY |
+                    wgpu::Features::PUSH_CONSTANTS,
                 required_limits: adapter.limits(),
                 memory_hints: Default::default()
             },

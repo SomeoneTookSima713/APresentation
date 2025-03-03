@@ -2,6 +2,7 @@
 
 use std::any::TypeId;
 
+use crate::presentation::asset::AssetManager;
 use crate::presentation::parser::data::ParsedStructure;
 
 pub mod property;
@@ -40,46 +41,45 @@ pub trait ElementRenderer {
 
     fn reconfigure(&mut self, surface_config: &wgpu::SurfaceConfiguration) {}
 
-    fn render(
+    fn submit_to_render(
         &mut self,
         element: &Self::Element,
         eval_engine: &rhai::Engine,
         eval_scope: rhai::Scope<'static>,
+        asset_manager: &AssetManager,
         render_pass: &mut wgpu::RenderPass
-    );
+    ) -> anyhow::Result<()>;
+
+    fn finish_render(&mut self, render_pass: &mut wgpu::RenderPass);
 }
 
 /// *For internal use only!*
 /// 
-/// An dyn-safe variant of the [`ElementRenderer`] trait that is automatically
-/// implemented by any type implementing `ElementRenderer`.
+/// An dyn-safe extension of the [`ElementRenderer`] trait that is
+/// automatically implemented by any type implementing `ElementRenderer`.
 pub trait ElemRendObjS: downcast_rs::Downcast {
-    fn reconfigure(&mut self, surface_config: &wgpu::SurfaceConfiguration) {}
-
-    fn render_dyn(
+    fn submit_to_render_dyn(
         &mut self,
         element: &dyn ElemObjS,
         eval_engine: &rhai::Engine,
         eval_scope: rhai::Scope<'static>,
+        asset_manager: &AssetManager,
         render_pass: &mut wgpu::RenderPass
-    );
+    ) -> anyhow::Result<()>;
 }
 downcast_rs::impl_downcast!(ElemRendObjS);
 
 impl<T: ElementRenderer + 'static> ElemRendObjS for T {
-    fn reconfigure(&mut self, surface_config: &wgpu::SurfaceConfiguration) {
-        <T as ElementRenderer>::reconfigure(self, surface_config);
-    }
-
-    fn render_dyn(
+    fn submit_to_render_dyn(
         &mut self,
         element: &dyn ElemObjS,
         eval_engine: &rhai::Engine,
         eval_scope: rhai::Scope<'static>,
+        asset_manager: &AssetManager,
         render_pass: &mut wgpu::RenderPass
-    ) {
+    ) -> anyhow::Result<()> {
         if let Some(elem) = element.downcast_ref() {
-            self.render(elem, eval_engine, eval_scope, render_pass);
+            self.submit_to_render(elem, eval_engine, eval_scope, asset_manager, render_pass)
         } else {
             panic!("Downcast in presentation::element::ElemRendObjS::render_dyn() failed!")
         }
@@ -110,14 +110,16 @@ impl RegisteredElement {
 pub struct RegisteredElementRenderer {
     element_type_id: TypeId,
     init_fn: Box<dyn for<'a> Fn(wgpu::Device, wgpu::Queue, &'a wgpu::SurfaceConfiguration) -> Box<dyn ElemRendObjS>>,
-    reconfigure_fn: Box<dyn for<'a, 'b> Fn(&'a mut dyn ElemRendObjS, &'b wgpu::SurfaceConfiguration)>,
-    render_fn: Box<dyn for<'a, 'b> Fn(
+    reconfigure_fn: Box<dyn for<'a> Fn(&'a mut dyn ElemRendObjS, &'a wgpu::SurfaceConfiguration)>,
+    submit_to_render_fn: Box<dyn for<'a> Fn(
         &'a mut dyn ElemRendObjS,
-        &'b dyn ElemObjS,
-        &rhai::Engine,
+        &'a dyn ElemObjS,
+        &'a rhai::Engine,
         rhai::Scope<'static>,
-        &'b mut wgpu::RenderPass
-    )>
+        &'a AssetManager,
+        &'a mut wgpu::RenderPass
+    ) -> anyhow::Result<()>>,
+    finish_render_fn: Box<dyn for<'a> Fn(&'a mut dyn ElemRendObjS, &'a mut wgpu::RenderPass)>
 }
 
 impl RegisteredElementRenderer {
@@ -126,13 +128,17 @@ impl RegisteredElementRenderer {
             element_type_id: TypeId::of::<T::Element>(),
             init_fn: Box::new(|d, q, c| Box::new(T::init(d, q, c))),
             reconfigure_fn: Box::new(|s, c| match s.downcast_mut() {
-                Some(s) => <T as ElemRendObjS>::reconfigure(s, c),
+                Some(s) => T::reconfigure(s, c),
                 None => panic!("Downcast in <RegisteredEleentRenderer>.reconfigure_fn failed!")
             }),
-            render_fn: Box::new(|s, el, e, sc, r| match s.downcast_mut() {
-                Some(s) => <T as ElemRendObjS>::render_dyn(s, el, e, sc, r),
-                None => panic!("Downcast in <RegisteredEleentRenderer>.render_fn failed!")
-            })
+            submit_to_render_fn: Box::new(|s, el, e, sc, a, r| match s.downcast_mut() {
+                Some(s) => <T as ElemRendObjS>::submit_to_render_dyn(s, el, e, sc, a, r),
+                None => panic!("Downcast in <RegisteredEleentRenderer>.submit_to_render_fn failed!")
+            }),
+            finish_render_fn: Box::new(|s, r| match s.downcast_mut() {
+                Some(s) => T::finish_render(s, r),
+                None => panic!("Downcast in <RegisteredEleentRenderer>.finish_render_fn failed!")
+            }),
         }
     }
 }

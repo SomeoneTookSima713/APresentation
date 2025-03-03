@@ -26,8 +26,23 @@ impl std::hash::Hash for ElementID {
 pub struct Presentation {
     states: HashMap<String, PresentationState>,
     assets: asset::AssetManager,
+    elements: element::RegisteredElements,
+    rhai_engine: rhai::Engine,
     curr_state_idx: usize,
     curr_state: ActivePresState
+}
+
+impl Presentation {
+    pub fn new() -> Self {
+        Self {
+            states: HashMap::new(),
+            assets: asset::AssetManager::new(),
+            elements: element::RegisteredElements::new(),
+            rhai_engine: todo!(),
+            curr_state_idx: 0,
+            curr_state: ActivePresState::new()
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -43,6 +58,10 @@ pub struct ActivePresState {
 }
 
 impl ActivePresState {
+    pub fn new() -> Self {
+        Self { background_color: [0.0;3], elements: HashMap::new() }
+    }
+
     pub fn apply_new_state(&mut self, state: PresentationState) {
         self.background_color = state.background_color;
         for id in state.removed_elements {

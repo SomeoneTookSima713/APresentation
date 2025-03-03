@@ -1,5 +1,9 @@
+use std::sync::OnceLock;
+
+use crate::PUSH_CONSTANT_MANAGER;
 use crate::presentation::{ asset, element, parser };
 
+use asset::AssetManager;
 use element::{ Element, ElementRenderer };
 use element::property::{ Property, PropertyCompatible };
 use element::property::base::{ BaseProperties, BasePropertiesProvider };
@@ -24,20 +28,21 @@ pub use assets::*;
 
 pub struct Rect {
     base_properties: BaseProperties,
+    size: Property<(f64, f64)>,
     source: Property<RectSource>,
     corner_rounding: Property<CornerRounding>
 }
 
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum RectSource {
     Color(f64, f64, f64, f64),
-    Image()
+    Image(String)
 }
 
 pub enum UncomputedRectSource {
     Color([Property<f64>; 4]),
-    Image()
+    Image(Property<String>)
 }
 
 impl PropertyCompatible for RectSource {
@@ -52,7 +57,7 @@ impl PropertyCompatible for RectSource {
                     UncomputedRectSource::Color([col.0, col.1, col.2, col.3])
                 },
                 "Image" => {
-                    todo!()
+                    UncomputedRectSource::Image(<(String,) as PropertyCompatible>::from_value(v, engine)?.0)
                 },
                 _ => None?
             })
@@ -70,7 +75,7 @@ impl PropertyCompatible for RectSource {
                 b.evaluate(scope, engine)?,
                 a.evaluate(scope, engine)?
             ),
-            UncomputedRectSource::Image() => todo!()
+            UncomputedRectSource::Image(s) => Self::Image(s.evaluate(scope, engine)?)
         })
     }
 }
@@ -152,35 +157,425 @@ impl Element for Rect {
     where Self: Sized {
         Ok(Self {
             base_properties: structure.try_get_base_properties(engine)?,
+            size: structure.try_get_property("size", engine)?,
             source: structure.try_get_property("source", engine)?,
             corner_rounding: structure.try_get_property("corner_rounding", engine)?
         })
     }
 }
 
-pub struct RectRenderer {
-
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    pos: [f32; 2],
+    tex_coords: [f32; 2]
 }
+
+impl Vertex {
+    pub const DESC: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![
+            0 => Float32x2,
+            1 => Float32x2
+        ]
+    };
+
+    pub const RECT_VERTS: &[Self] = &[
+        Self::new([-0.5, -0.5], [0.0, 1.0]),
+        Self::new([ 0.5, -0.5], [1.0, 1.0]),
+        Self::new([ 0.5,  0.5], [1.0, 0.0]),
+        Self::new([-0.5,  0.5], [0.0, 0.0])
+    ];
+
+    pub const fn new(pos: [f32; 2], tex_coords: [f32; 2]) -> Self {
+        Self { pos, tex_coords }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Instance {
+    pos: [f32; 3],
+    size: [f32; 2],
+    color: [f32; 4],
+    texture_ind_and_rounding_type: u32,
+    rounding: [f32; 4]
+}
+
+impl Instance {
+    pub const DESC: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &wgpu::vertex_attr_array![
+            2 => Float32x3,
+            3 => Float32x2,
+            4 => Float32x4,
+            5 => Uint32,
+            6 => Float32x4,
+        ]
+    };
+
+    pub const fn new(
+        pos: [f32; 3],
+        size: [f32; 2],
+        color: [f32; 4],
+        texture_ind: u32,
+        rounding_type_is_circle: bool,
+        rounding: [f32; 4]
+    ) -> Self {
+        Self { pos, size, color, texture_ind_and_rounding_type: texture_ind | ((rounding_type_is_circle as u32) << 31), rounding }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct PushConstant {
+    window_res: [u32; 2]
+}
+
+/// Concept for the render model:
+/// 
+/// We have one big bind group containing all the textures needed for the
+/// current slide, as well as a dummy white texture for rectangles not using an
+/// image. We are then able to draw all [`Rect`] elements in one draw call by
+/// instancing them.
+pub struct RectRenderer {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    render_pipeline: wgpu::RenderPipeline,
+    vertex_buffer: wgpu::Buffer,
+    instance_buffer: wgpu::Buffer,
+    push_constant: PushConstant,
+    push_constant_start: u32,
+    /// A white dummy texture for rectangles not using an image.
+    dummy_texture: (wgpu::Texture, wgpu::TextureView),
+    /// The texture samplers used in the bind group: one using linear filtering
+    /// and one using nearest-neighbor filtering.
+    texture_samplers: (wgpu::Sampler, wgpu::Sampler),
+    image_bind_group: wgpu::BindGroup,
+    current_images: Vec<String>,
+    needed_images: Vec<(String, wgpu::TextureView)>,
+    /// Indicates wether or not a reconstruction of the image bind group is
+    /// necessary before dispatching the next render call.
+    ibg_reconstruct_necessary: bool,
+    current_rect_instances: Vec<Instance>
+}
+
+static IMAGE_ARR_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
+const IMAGE_ARR_MAX_ITEMS: std::num::NonZero<u32> = std::num::NonZero::<u32>::new(128).unwrap();
+
+const INSTANCE_BUFFER_BASE_SIZE: wgpu::BufferAddress = 16; // wgpu::BufferAddress currently coerces to u64 (wgpu version 24.0.1)
+
+const DUMMY_TEXTURE_DIMENSIONS: (u32, u32) = (8,8);
+const DUMMY_TEXTURE_DATA: &[f32] = &[1.0; 4*(DUMMY_TEXTURE_DIMENSIONS.0 as usize)*(DUMMY_TEXTURE_DIMENSIONS.1 as usize)];
 
 impl ElementRenderer for RectRenderer {
     type Element = Rect;
 
     fn init(device: wgpu::Device, queue: wgpu::Queue, surface_config: &wgpu::SurfaceConfiguration) -> Self
     where Self: Sized {
-        todo!()
+        let _span = tracing::info_span!("elements::rect::RectRenderer::init()");
+
+        use wgpu::util::{ BufferInitDescriptor, DeviceExt };
+
+        let set_succeeded = IMAGE_ARR_BIND_GROUP_LAYOUT.set(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Rect Image Array Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false
+                    },
+                    count: Some(IMAGE_ARR_MAX_ITEMS)
+                },
+                wgpu::BindGroupLayoutEntry { // Linear sampler
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None
+                },
+                wgpu::BindGroupLayoutEntry { // Nearest-neighbor sampler
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None
+                },
+            ]
+        }));
+        if set_succeeded.is_err() {
+            tracing::error!("Multiple RectRenderer instances were initialised!");
+        }
+
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+
+        let push_constant_range = PUSH_CONSTANT_MANAGER.get_range(8);
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[IMAGE_ARR_BIND_GROUP_LAYOUT.get().expect("Asset types should be inited before renderers!")],
+            push_constant_ranges: &[wgpu::PushConstantRange {
+                stages: wgpu::ShaderStages::VERTEX,
+                range: push_constant_range.clone()
+            }]
+        });
+
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Image Render Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Vertex::DESC, Instance::DESC]
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL
+                })]
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false
+            },
+            multiview: None,
+            cache: None
+        });
+
+        let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Rect Renderer Vertex Buffer"),
+            contents: bytemuck::cast_slice(Vertex::RECT_VERTS),
+            usage: wgpu::BufferUsages::VERTEX
+        });
+
+        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Rect Renderer Instance Buffer"),
+            size: std::mem::size_of::<Instance>() as wgpu::BufferAddress * INSTANCE_BUFFER_BASE_SIZE,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false
+        });
+
+        let push_constant = PushConstant { window_res: [surface_config.width, surface_config.height] };
+
+        let size = wgpu::Extent3d { width: DUMMY_TEXTURE_DIMENSIONS.0, height: DUMMY_TEXTURE_DIMENSIONS.1, depth_or_array_layers: 1 };
+        let dummy_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[]
+        });
+        let dummy_texture_view = dummy_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfoBase {
+                texture: &dummy_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All
+            },
+            bytemuck::cast_slice(DUMMY_TEXTURE_DATA),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(16 * size.width),
+                rows_per_image: Some(size.height)
+            },
+            size
+        );
+
+        let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            .. Default::default()
+        });
+        let nearest_neighbor_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            .. Default::default()
+        });
+
+        let image_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Rect Renderer Image Array Bind Group"),
+            layout: IMAGE_ARR_BIND_GROUP_LAYOUT.get().unwrap(),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureViewArray(&[&dummy_texture_view])
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&linear_sampler)
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&nearest_neighbor_sampler)
+                }
+            ]
+        });
+
+        Self {
+            device,
+            queue,
+            render_pipeline,
+            vertex_buffer,
+            instance_buffer,
+            push_constant,
+            push_constant_start: push_constant_range.start,
+            dummy_texture: (dummy_texture, dummy_texture_view),
+            texture_samplers: (linear_sampler, nearest_neighbor_sampler),
+            image_bind_group,
+            ibg_reconstruct_necessary: false,
+            current_images: Vec::new(),
+            needed_images: Vec::new(),
+            current_rect_instances: Vec::new()
+        }
     }
 
     fn reconfigure(&mut self, surface_config: &wgpu::SurfaceConfiguration) {
-        todo!()
+        self.push_constant.window_res = [surface_config.width, surface_config.height];
     }
 
-    fn render(
+    fn submit_to_render(
             &mut self,
-            element: &Self::Element,
+            element: &Rect,
             eval_engine: &rhai::Engine,
-            eval_scope: rhai::Scope<'static>,
+            mut eval_scope: rhai::Scope<'static>,
+            asset_manager: &AssetManager,
             render_pass: &mut wgpu::RenderPass
-    ) {
-        todo!()
+    ) -> anyhow::Result<()> {
+        fn eval_failed(prop: &str) -> anyhow::Error {
+            anyhow::anyhow!("Evaluation of property '{prop}' failed!")
+        }
+
+        let pos = element.base_properties.position.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("position"))?;
+        let z = element.base_properties.z_index.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("z_index"))?;
+        let size = element.size.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("size"))?;
+        let source = element.source.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("source"))?;
+        let (rounding_type_bool, rounding) = match element.corner_rounding.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("source"))?{
+            CornerRounding::Circle { top_left, top_right, bottom_left, bottom_right }
+            => (true, [top_left as f32, top_right as f32, bottom_left as f32, bottom_right as f32]),
+            CornerRounding::Squircle { top_left, top_right, bottom_left, bottom_right }
+            => (false, [top_left as f32, top_right as f32, bottom_left as f32, bottom_right as f32]),
+        };
+
+        match source {
+            RectSource::Color(r, g, b, a) => {
+                self.current_rect_instances.push(Instance::new(
+                    [pos.0 as f32, pos.1 as f32, z as f32],
+                    [size.0 as f32, size.1 as f32],
+                    [r as f32, g as f32, b as f32, a as f32],
+                    0,
+                    rounding_type_bool,
+                    rounding,
+                ));
+            },
+            RectSource::Image(id) => {
+                let view = asset_manager.get_asset::<Image, _>(&id)
+                    .ok_or(anyhow::anyhow!("Couldn't load image with ID '{id}'!"))?
+                    .view.clone();
+                let tex_ind;
+                if let Some(i) = self.current_images.iter().enumerate().find(|i| i.1 == &id).map(|v| v.0) {
+                    tex_ind = i+1;
+                } else {
+                    self.ibg_reconstruct_necessary = true;
+                    tex_ind = self.needed_images.len() + 1;
+                }
+                self.needed_images.push((id, view));
+
+                self.current_rect_instances.push(Instance::new(
+                    [pos.0 as f32, pos.1 as f32, z as f32],
+                    [size.0 as f32, size.1 as f32],
+                    [1.0,1.0,1.0,1.0],
+                    tex_ind as u32,
+                    rounding_type_bool,
+                    rounding,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn finish_render(&mut self, render_pass: &mut wgpu::RenderPass) {
+        use wgpu::util::{ BufferInitDescriptor, DeviceExt };
+
+        if self.ibg_reconstruct_necessary {
+            let mut views = Vec::with_capacity(self.needed_images.len() + 1);
+            views.push(&self.dummy_texture.1);
+            for img in self.needed_images.iter() {
+                views.push(&img.1);
+            }
+            self.image_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Rect Renderer Image Array Bind Group"),
+                layout: IMAGE_ARR_BIND_GROUP_LAYOUT.get().unwrap(),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureViewArray(&views)
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.texture_samplers.0)
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&self.texture_samplers.1)
+                    }
+                ]
+            });
+
+            self.current_images = self.needed_images.iter().map(|(s, _)| s.clone()).collect();
+        }
+
+        let instance_data_bytes = bytemuck::cast_slice(&self.current_rect_instances);
+
+        if self.instance_buffer.size() < instance_data_bytes.len() as wgpu::BufferAddress {
+            self.instance_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+                label: Some("Rect Renderer Instance Buffer"),
+                contents: instance_data_bytes,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST
+            });
+        }else {
+            self.queue.write_buffer(&self.instance_buffer, 0, instance_data_bytes);
+        }
+
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.image_bind_group, &[]);
+        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..instance_data_bytes.len() as wgpu::BufferAddress));
+        render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, self.push_constant_start, bytemuck::cast_slice(&[self.push_constant]));
+        render_pass.draw(0..Vertex::RECT_VERTS.len() as u32, 0..self.current_rect_instances.len() as u32);
+
+        self.current_rect_instances.clear();
+        self.needed_images.clear();
+        self.ibg_reconstruct_necessary = false;
     }
 }

@@ -21,6 +21,10 @@ pub struct AssetLoadingParams {
 }
 
 pub trait AssetType {
+    /// This method serves as an initialization call for any resources
+    /// necessary to load assets, e.g. bind group layouts for images.
+    fn global_init(loading_params: AssetLoadingParams);
+
     fn load_asset(data: Table, loading_params: AssetLoadingParams) -> Result<(String, Self), AssetLoadError>
     where Self: Sized;
 }

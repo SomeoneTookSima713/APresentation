@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 wgpu = "24.0.1"
 winit = { version = "0.30", features = ["rwh_06"] }
+image = { version = "0.25", default-features = false, features = ["rayon", "bmp", "gif", "ico", "jpeg", "png", "tga", "tiff", "webp"] }
 
 parking_lot = "0.12"
 pollster = "*"
@@ -15,6 +16,7 @@ thiserror = "2.0"
 
 downcast-rs = "2.0"
 hashbrown = "0.15"
+bytemuck = "1.21"
 
 impl-trait-for-tuples = "0.2"
 
