@@ -9,8 +9,8 @@ build-dev *ARGS:
 build-release *ARGS:
     cargo build {{ARGS}} --release
 
-run-dev *ARGS: (build-dev ARGS) (setup_running_env)
-    cd run/ && ../target/debug/{{file}}
+run-dev *ARGS: (build-dev (replace_regex(ARGS, "--\\s.+", ""))) (setup_running_env)
+    cd run/ && ../target/debug/{{file}} {{ replace_regex(ARGS, ".*--\\s", "") }}
 
 run-release *ARGS: (build-release ARGS) (setup_running_env)
     cd run/ && ../target/release/{{file}}

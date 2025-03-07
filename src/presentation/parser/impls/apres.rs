@@ -9,7 +9,7 @@ use crate::presentation::parser::data::{ ParsedStructure, Value };
 use crate::presentation::element::RegisteredElements;
 use crate::presentation::asset::{ AssetManager, AssetLoadingParams };
 use crate::presentation::{ ElementID, PresentationState };
-use super::{ Parser, ParserError };
+use super::{ Parser, ParserError, ParsedPresentationStates };
 
 mod tokenization {
     #[derive(Clone, Copy, Debug)]
@@ -646,7 +646,7 @@ impl Parser for ApresParser<'static> {
                     if current_state.is_none() { Err(ParserError::GenericError(anyhow::anyhow!("Cannot create element before creating a slide!")))? }
 
                     let id = match ident {
-                        Some(s) => ElementID::Custom(s.to_string()),
+                        Some(s) => ElementID::Custom(format!("{}::{}", current_state_name, s)),
                         None => ElementID::Generated(rand::random())
                     };
 
@@ -705,6 +705,11 @@ impl Parser for ApresParser<'static> {
                     current_state.as_mut().unwrap().removed_elements.push(ElementID::Custom(ident.clone()));
                 }
             }
+        }
+
+        let s = current_state.take();
+        if let Some(state) = s {
+            states.push(state);
         }
 
         Ok(states)

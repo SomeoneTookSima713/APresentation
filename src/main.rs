@@ -5,18 +5,20 @@
 #![feature(let_chains)]
 #![feature(iterator_try_collect)]
 
-use std::sync::Arc;
+use std::sync::{ Arc, OnceLock };
 
 use winit::window::Window;
 
 mod util;
 mod config;
+mod cli;
 mod presentation;
 mod elements;
 
 use util::improved_app_handler::{ App, AppHandler };
 
 const CONFIG_PATH: &str = "config.toml";
+static CURR_CONFIG_PATH: OnceLock<std::path::PathBuf> = OnceLock::new();
 
 pub struct PushConstantManager(std::sync::atomic::AtomicU32);
 /// Use the methods on this static's type in your element renderer's init
@@ -40,6 +42,7 @@ struct APresentation {
     queue: wgpu::Queue,
     surface_config: wgpu::SurfaceConfiguration,
     window: Arc<Window>,
+    presentation: presentation::Presentation
 }
 
 impl AppHandler for APresentation {
@@ -50,12 +53,14 @@ impl AppHandler for APresentation {
         use winit::window::WindowAttributes;
         use winit::dpi::PhysicalSize;
 
-        let config = match config::AppConfig::load(CONFIG_PATH) {
+        let conf_path = CURR_CONFIG_PATH.get_or_init(|| CONFIG_PATH.into());
+
+        let config = match config::AppConfig::load(&conf_path) {
             Ok(c) => c,
             Err(config::AppConfigLoadError::IOError(e)) if e.kind() == std::io::ErrorKind::NotFound => {
                 tracing::info!("Config file doesn't exist! Creating new file with default values...");
                 let def = config::AppConfig::default();
-                def.save(CONFIG_PATH)?;
+                def.save(&conf_path)?;
                 def
             },
             Err(e) => anyhow::bail!(e)
@@ -137,23 +142,19 @@ impl AppHandler for APresentation {
             desired_maximum_frame_latency: 4
         };
 
-        // // Testing setup to test the parser
-        // let test_engine = rhai::Engine::new();
+        let mut reg_elems = presentation::element::RegisteredElements::new();
+        reg_elems.register_element::<elements::rect::Rect>("Rect".to_string());
+        reg_elems.register_element_renderer::<elements::rect::RectRenderer>();
 
-        // use presentation::parser::{ Parser, impls::apres::ApresParser };
+        let mut asset_manager = presentation::asset::AssetManager::new();
+        asset_manager.register_asset_type::<elements::rect::Image>("image".to_string());
 
-        // let mut reg_elems = presentation::element::RegisteredElements::new();
-        // reg_elems.register_element::<elements::rect::Rect>("Rect".to_string());
-        // reg_elems.register_element_renderer::<elements::rect::RectRenderer>();
+        let mut parser_collection = presentation::parser::ParserCollection::new();
+        parser_collection.register_parser::<presentation::parser::impls::apres::ApresParser>();
 
-        // let mut asset_manager = presentation::asset::AssetManager::new();
-        // asset_manager.register_asset_type::<elements::rect::Image>("image".to_string());
-        // let alp = presentation::asset::AssetLoadingParams {
-        //     gpu_device: device.clone(),
-        //     gpu_queue: queue.clone()
-        // };
+        let presentation = presentation::Presentation::new("../test.apres", reg_elems, asset_manager, parser_collection, device.clone(), queue.clone())?;
 
-        // println!("{:?}", ApresParser::parse(std::fs::File::open("../test.apres")?, &reg_elems, &test_engine, &mut asset_manager, alp));
+        tracing::info!("{:#?}", presentation);
 
         Ok(APresentation {
             surface,
@@ -161,7 +162,8 @@ impl AppHandler for APresentation {
             device,
             queue,
             surface_config,
-            window
+            window,
+            presentation,
         })
     }
 
@@ -243,11 +245,21 @@ fn main() -> anyhow::Result<()> {
             .finish()
     ).expect("Couldn't initialize logger!");
 
-    let event_loop = winit::event_loop::EventLoop::new()?;
+    use clap::Parser;
+    let cli = cli::CLI::parse();
 
-    let mut app: App<APresentation> = App::default();
+    CURR_CONFIG_PATH.set(cli.config.unwrap_or(CONFIG_PATH.into())).expect("Unreachable");
 
-    event_loop.run_app(&mut app)?;
+    match cli.command {
+        cli::Command::Generate => { std::fs::write(cli.file, include_bytes!("template.apres"))?; Ok(()) },
+        cli::Command::Present => {
+            let event_loop = winit::event_loop::EventLoop::new()?;
 
-    app.get_errors()
+            let mut app: App<APresentation> = App::default();
+
+            event_loop.run_app(&mut app)?;
+
+            app.get_errors()
+        }
+    }
 }

@@ -34,6 +34,12 @@ pub struct RegisteredAssetType {
     load_asset_fn: Box<dyn Fn(Table, AssetLoadingParams) -> Result<(String, Box<dyn Any>), AssetLoadError>>
 }
 
+impl std::fmt::Debug for RegisteredAssetType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RegisteredAssetType")
+    }
+}
+
 impl RegisteredAssetType {
     pub(self) fn new<T: AssetType + 'static>() -> Self {
         Self {
@@ -47,6 +53,7 @@ impl RegisteredAssetType {
     }
 }
 
+#[derive(Debug)]
 pub struct AssetManager {
     registered_asset_types: HashMap<TypeId, RegisteredAssetType>,
     asset_type_names: HashMap<String, TypeId>,

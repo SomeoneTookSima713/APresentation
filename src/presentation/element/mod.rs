@@ -148,6 +148,12 @@ pub struct RegisteredElements {
     pub element_renderer: hashbrown::HashMap<TypeId, RegisteredElementRenderer>
 }
 
+impl std::fmt::Debug for RegisteredElements {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RegisteredElements[{}]", self.element_types.keys().cloned().reduce(|mut a, e| {a.push_str(&e); a}).unwrap_or(String::new()))
+    }
+}
+
 impl RegisteredElements {
     pub fn new() -> Self {
         Self { element_types: hashbrown::HashMap::new(), element_renderer: hashbrown::HashMap::new() }

@@ -1,0 +1,41 @@
+# Here, you define all the assets your presentation uses. This part gets parsed
+# like regular TOML and thus requires a different comment syntax than
+# everything below it.
+
+[[image]]
+    path = "your_image.png"
+    # The name is optional in images
+    name = "Epic Image"
+
+# This line separates the assets from the rest of the presentation definition.
+---
+// This creates a new slide. The string is the name and the tuple of three
+// values is the background color.
+slide "MySlide" (1.0, 1.0, 1.0)
+// This creates a new Rect element. The string is a custom name and is
+// optional.
+newelem "ColorRect" Rect (
+    // Each property (and each part of any property) can be replaced with a
+    // code snippet, indicated by the Rhai(...)-block around it.
+    position: (100, Rhai("h * 0.5")),
+    size: (Rhai("0.5*w"), 200),
+    anchor: TopRight,
+    alignment: MidRight,
+    source: Color(1.0, 0.5, 0.0, 1.0),
+    corner_rounding: Circle {
+        top_left: 1.0,
+        top_right: 0.5,
+        bottom_left: 1.0,
+        bottom_right: 0.5
+    },
+    z_index: 0
+)
+
+slide "MySecondSlide" (1.0, 1.0, 1.0)
+modifyelem "ColorRect" (
+    source: Image("Epic Image")
+)
+
+slide "MyThirdSlide" (1.0, 1.0, 1.0)
+// Destroys the "ColorRect" element of the "MySlide" slide
+discard "MySlide::ColorRect"

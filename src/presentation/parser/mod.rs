@@ -1,6 +1,6 @@
 use std::io::Read;
 
-use hashbrown::HashSet;
+use hashbrown::{ HashMap, HashSet };
 
 use crate::presentation::PresentationState;
 use crate::presentation::element::RegisteredElements;
@@ -22,6 +22,12 @@ pub trait Parser {
         asset_manager: &mut AssetManager,
         asset_loading_params: AssetLoadingParams,
     ) -> Result<Vec<PresentationState>, ParserError>;
+}
+
+#[derive(Debug)]
+pub struct ParsedPresentationStates {
+    pub states: HashMap<String, PresentationState>,
+    pub order: Vec<String>
 }
 
 #[derive(Debug, thiserror::Error)]

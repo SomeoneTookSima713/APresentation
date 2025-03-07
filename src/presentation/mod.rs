@@ -24,7 +24,7 @@ impl std::hash::Hash for ElementID {
 }
 
 pub struct Presentation {
-    states: HashMap<String, PresentationState>,
+    states: Vec<PresentationState>,
     assets: asset::AssetManager,
     elements: element::RegisteredElements,
     rhai_engine: rhai::Engine,
@@ -32,16 +32,85 @@ pub struct Presentation {
     curr_state: ActivePresState
 }
 
-impl Presentation {
-    pub fn new() -> Self {
-        Self {
-            states: HashMap::new(),
-            assets: asset::AssetManager::new(),
-            elements: element::RegisteredElements::new(),
-            rhai_engine: todo!(),
-            curr_state_idx: 0,
-            curr_state: ActivePresState::new()
+impl std::fmt::Debug for Presentation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[derive(Debug)]
+        struct Presentation<'a> {
+            states: &'a Vec<PresentationState>,
+            assets: &'a asset::AssetManager,
+            elements: &'a element::RegisteredElements,
+            curr_state_idx: usize,
+            curr_state: &'a ActivePresState
         }
+
+        let Self {
+            states,
+            assets,
+            elements,
+            curr_state_idx,
+            curr_state,
+            ..
+        } = self;
+
+        std::fmt::Debug::fmt(&Presentation {
+            states,
+            assets,
+            elements,
+            curr_state_idx: *curr_state_idx,
+            curr_state
+        }, f)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PresentationCreationError {
+    #[error("error parsing the given file: {0}")]
+    ParserError(#[from] parser::ParserError),
+    #[error("couldn't open the given file")]
+    FileOpenError,
+    #[error("no slides in the presentation")]
+    NoSlides
+}
+
+impl Presentation {
+    pub fn new(
+        filename: &str,
+        registered_elements: element::RegisteredElements,
+        mut asset_manager: asset::AssetManager,
+        parser_collection: parser::ParserCollection,
+        device: wgpu::Device,
+        queue: wgpu::Queue
+    ) -> Result<Self, PresentationCreationError> {
+        let mut rhai_engine = rhai::Engine::new();
+        rhai_engine.set_fail_on_invalid_map_property(true)
+            .set_max_call_levels(64)
+            // .set_optimization_level(rhai::OptimizationLevel::Full)
+            .set_strict_variables(false);
+
+        let mut file = std::fs::File::open(filename).map_err(|_| PresentationCreationError::FileOpenError)?;
+        let states = parser_collection.parse(
+            &mut file,
+            filename,
+            &registered_elements,
+            &rhai_engine,
+            &mut asset_manager,
+            asset::AssetLoadingParams {
+                gpu_device: device.clone(),
+                gpu_queue: queue.clone()
+            }
+        )?;
+
+        let mut curr_state = ActivePresState::new();
+        curr_state.apply_new_state(states.get(0).ok_or(PresentationCreationError::NoSlides)?.clone());
+
+        Ok(Self {
+            states,
+            assets: asset_manager,
+            elements: registered_elements,
+            rhai_engine,
+            curr_state_idx: 0,
+            curr_state
+        })
     }
 }
 
@@ -52,6 +121,7 @@ pub struct PresentationState {
     pub new_elements: HashMap<ElementID, RcElement>
 }
 
+#[derive(Debug)]
 pub struct ActivePresState {
     background_color: [f64; 3],
     elements: HashMap<ElementID, (RcElement, f64)>
