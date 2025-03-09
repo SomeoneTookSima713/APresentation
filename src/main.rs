@@ -18,7 +18,11 @@ mod elements;
 use util::improved_app_handler::{ App, AppHandler };
 
 const CONFIG_PATH: &str = "config.toml";
+// It's really hacky, but this is the way I supply my application loop code my
+// cli arguments. Don't ask how I got the genious idea of doing it this overly
+// complicated way.
 static CURR_CONFIG_PATH: OnceLock<std::path::PathBuf> = OnceLock::new();
+static CURR_FILE_PATH: OnceLock<String> = OnceLock::new();
 
 pub struct PushConstantManager(std::sync::atomic::AtomicU32);
 /// Use the methods on this static's type in your element renderer's init
@@ -152,7 +156,15 @@ impl AppHandler for APresentation {
         let mut parser_collection = presentation::parser::ParserCollection::new();
         parser_collection.register_parser::<presentation::parser::impls::apres::ApresParser>();
 
-        let presentation = presentation::Presentation::new("../test.apres", reg_elems, asset_manager, parser_collection, device.clone(), queue.clone())?;
+        let presentation = presentation::Presentation::new(
+            CURR_FILE_PATH.get().expect("Unreachable"),
+            reg_elems,
+            asset_manager,
+            parser_collection,
+            device.clone(),
+            queue.clone(),
+            &surface_config
+        )?;
 
         tracing::info!("{:#?}", presentation);
 
@@ -201,22 +213,7 @@ impl APresentation {
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.1, g: 0.2, b: 0.3, a: 1.0 }),
-                        store: wgpu::StoreOp::Store
-                    }
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None
-            });
-        }
+        self.presentation.render(&view, &mut encoder, &self.surface_config)?;
 
         self.queue.submit([encoder.finish()]);
 
@@ -249,9 +246,10 @@ fn main() -> anyhow::Result<()> {
     let cli = cli::CLI::parse();
 
     CURR_CONFIG_PATH.set(cli.config.unwrap_or(CONFIG_PATH.into())).expect("Unreachable");
+    CURR_FILE_PATH.set(cli.file).expect("Unreachable");
 
     match cli.command {
-        cli::Command::Generate => { std::fs::write(cli.file, include_bytes!("template.apres"))?; Ok(()) },
+        cli::Command::Generate => { std::fs::write(CURR_FILE_PATH.get().unwrap(), include_bytes!("template.apres"))?; Ok(()) },
         cli::Command::Present => {
             let event_loop = winit::event_loop::EventLoop::new()?;
 

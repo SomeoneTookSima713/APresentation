@@ -10,5 +10,6 @@ pub struct BaseProperties {
 }
 
 pub trait BasePropertiesProvider {
+    #[allow(dead_code)]
     fn get_base_properties(&self) -> &BaseProperties;
 }

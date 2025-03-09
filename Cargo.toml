@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+proc_macros = { path = "./proc_macros" }
+
 wgpu = "24.0.1"
 winit = { version = "0.30", features = ["rwh_06"] }
 image = { version = "0.25", default-features = false, features = ["rayon", "bmp", "gif", "ico", "jpeg", "png", "tga", "tiff", "webp"] }
@@ -21,6 +23,7 @@ bytemuck = "1.21"
 impl-trait-for-tuples = "0.2"
 
 rand = "0.9"
+nalgebra = "0.33"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["ansi"] }
@@ -29,4 +32,4 @@ clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 
-rhai = { version = "1.21", features = [ "internals", "no_time" ] }
+rhai = { version = "1.21", features = [ "internals", "no_time", "metadata" ] }

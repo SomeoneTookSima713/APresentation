@@ -251,7 +251,7 @@ impl<'a> ApresParser<'a> {
                 }
                 continue;
             } else if in_digit {
-                if !(c.is_ascii_digit() || c == '.') {
+                if !(c.is_ascii_digit() || c == '.' || c == '-') {
                     self.push_token((Token::Literal(Literal::Number(&self.file[token_start..i])), token_location));
                     in_digit = false;
                 } else {
@@ -298,7 +298,7 @@ impl<'a> ApresParser<'a> {
                     token_start = i;
                     token_location = FileLocation { line, column: col };
                 },
-                c if c.is_ascii_digit() || c == '.' => {
+                c if c.is_ascii_digit() || c == '.' || c == '-' => {
                     in_digit = true;
                     token_start = i;
                     token_location = FileLocation { line, column: col };

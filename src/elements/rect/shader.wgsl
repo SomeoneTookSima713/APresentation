@@ -25,6 +25,9 @@ struct VertexOutput {
     @location(4) tex_coords: vec2<f32>
 }
 
+@group(1) @binding(0)
+var<uniform> camera_uniform: mat4x4<f32>;
+
 @vertex
 fn vs_main(
     vertex: VertexInput,
@@ -32,12 +35,10 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
 
-    var res_recip = vec2(1.0/constants.window_size.x, 1.0/constants.window_size.y);
-    var vert_pos = vertex.pos.xy * instance.size * res_recip;
-    var pos_offset =  instance.pos.xy * res_recip;
+    var vert_pos = vertex.pos.xy * instance.size;
+    var pos_offset =  instance.pos.xy;
 
-    out.clip_position = vec4<f32>(vert_pos.x + pos_offset.x, vert_pos.y + pos_offset.y, instance.pos.z, 1.0);
-    out.clip_position = vec4(out.clip_position.xy * 2.0 - vec2(1.0), out.clip_position.z, out.clip_position.w);
+    out.clip_position = camera_uniform * vec4<f32>(vert_pos.x + pos_offset.x, vert_pos.y + pos_offset.y, instance.pos.z, 1.0);
 
     out.color = instance.color;
     out.texture_ind = instance.texture_ind_and_rounding_type & 0x7FFFFFFFu;

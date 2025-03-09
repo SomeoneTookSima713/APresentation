@@ -1,7 +1,7 @@
 use std::path::{ Path, PathBuf };
 use std::sync::OnceLock;
 
-use image::{ ImageReader, Rgba32FImage };
+use image::{ ImageReader, RgbaImage };
 
 use crate::presentation::asset;
 
@@ -10,7 +10,7 @@ use asset::{ AssetType, AssetLoadingParams, AssetLoadError };
 pub(super) static IMAGE_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
 
 pub struct Image {
-    pub data: Rgba32FImage,
+    pub data: RgbaImage,
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView
 }
@@ -68,7 +68,7 @@ impl AssetType for Image {
         let reader = ImageReader::open(path)?;
 
         let data_dyn = reader.decode().map_err(|e| AssetLoadError::CreationError(anyhow::anyhow!(e)))?;
-        let data = data_dyn.to_rgba32f();
+        let data = data_dyn.to_rgba8();
 
         let size = wgpu::Extent3d { width: data_dyn.width(), height: data_dyn.height(), depth_or_array_layers: 1 };
         let texture = loading_params.gpu_device.create_texture(&wgpu::TextureDescriptor {
@@ -77,7 +77,7 @@ impl AssetType for Image {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[]
         });
@@ -91,13 +91,16 @@ impl AssetType for Image {
             bytemuck::cast_slice(data.as_ref()),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(16 * data_dyn.width()),
-                rows_per_image: Some(data_dyn.height())
+                bytes_per_row: Some(4 * data_dyn.width()),
+                rows_per_image: None
             },
             size
         );
 
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
         
         Ok((name, Image {
             data,

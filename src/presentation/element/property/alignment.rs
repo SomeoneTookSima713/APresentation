@@ -69,6 +69,23 @@ impl PropertyCompatible for Alignment {
             UncomputedAlignment::Custom(x, y) => Self::Custom(x.evaluate(scope, engine)?, y.evaluate(scope, engine)?)
         })
     }
+
+    fn build_custom_rhai_type() -> Option<(String, rhai::Module)>
+    where Self: Sized + 'static {
+        let mut module = rhai::Module::new();
+        module.set_native_fn("TopLeft", || Ok(Self::TopLeft));
+        module.set_native_fn("TopCenter", || Ok(Self::TopCenter));
+        module.set_native_fn("TopRight", || Ok(Self::TopRight));
+        module.set_native_fn("MidLeft", || Ok(Self::MidLeft));
+        module.set_native_fn("MidCenter", || Ok(Self::MidCenter));
+        module.set_native_fn("MidRight", || Ok(Self::MidRight));
+        module.set_native_fn("BottomLeft", || Ok(Self::BottomLeft));
+        module.set_native_fn("BottomCenter", || Ok(Self::BottomCenter));
+        module.set_native_fn("BottomRight", || Ok(Self::BottomRight));
+        module.set_native_fn("Custom", |x: f64, y: f64| Ok(Self::Custom(x, y)));
+
+        Some(("Alignment".to_string(), module))
+    }
 }
 
 impl Into<(f64, f64)> for Alignment {
@@ -86,5 +103,11 @@ impl Into<(f64, f64)> for Alignment {
             BottomRight =>  (1.0, 1.0),
             Custom(x, y) => (  x,   y)
         }
+    }
+}
+
+impl Alignment {
+    pub fn into_fracts(&self) -> (f64, f64) {
+        (*self).into()
     }
 }

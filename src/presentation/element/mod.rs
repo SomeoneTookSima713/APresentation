@@ -23,15 +23,21 @@ pub trait Element: property::base::BasePropertiesProvider {
 /// 
 /// An dyn-safe marker for the [`Element`] trait that is automatically
 /// implemented by any type implementing `Element`.
-pub trait ElemObjS: downcast_rs::Downcast {}
+pub trait ElemObjS: downcast_rs::Downcast {
+    fn underlying_type_id(&self) -> TypeId;
+}
 downcast_rs::impl_downcast!(ElemObjS);
 impl std::fmt::Debug for dyn ElemObjS {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "dyn ElemObjS")
+        write!(f, "dyn ElemObjS({:?})", self.underlying_type_id())
     }
 }
 
-impl<T: Element + 'static> ElemObjS for T {}
+impl<T: Element + 'static> ElemObjS for T {
+    fn underlying_type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+}
 
 pub trait ElementRenderer {
     type Element: Element<Renderer = Self> + 'static;
@@ -69,6 +75,12 @@ pub trait ElemRendObjS: downcast_rs::Downcast {
 }
 downcast_rs::impl_downcast!(ElemRendObjS);
 
+impl std::fmt::Debug for dyn ElemRendObjS {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ElementRenderer")
+    }
+}
+
 impl<T: ElementRenderer + 'static> ElemRendObjS for T {
     fn submit_to_render_dyn(
         &mut self,
@@ -91,6 +103,7 @@ impl<T: ElementRenderer + 'static> ElemRendObjS for T {
 /// `&self`.
 pub struct RegisteredElement {
     pub renderer_type_id: TypeId,
+    pub own_type_id: TypeId,
     constructor_fn: Box<dyn for<'a> Fn(ParsedStructure, &'a rhai::Engine) -> anyhow::Result<Box<dyn ElemObjS>>>
 }
 
@@ -99,7 +112,11 @@ pub struct RegisteredElement {
 /// `&self`.
 impl RegisteredElement {
     pub fn new<T: Element + 'static>() -> Self {
-        Self { renderer_type_id: TypeId::of::<T::Renderer>(), constructor_fn: Box::new(|s, e| T::from_structure(s, e).map(|s| Box::new(s) as Box<dyn ElemObjS>)) }
+        Self {
+            renderer_type_id: TypeId::of::<T::Renderer>(),
+            own_type_id: TypeId::of::<T>(),
+            constructor_fn: Box::new(|s, e| T::from_structure(s, e).map(|s| Box::new(s) as Box<dyn ElemObjS>))
+        }
     }
 
     pub fn construct(&self, parsed_structure: ParsedStructure, engine: &rhai::Engine) -> anyhow::Result<Box<dyn ElemObjS>> {
@@ -141,6 +158,30 @@ impl RegisteredElementRenderer {
             }),
         }
     }
+
+    pub fn init(&self, device: wgpu::Device, queue: wgpu::Queue, surface_config: &wgpu::SurfaceConfiguration) -> Box<dyn ElemRendObjS> {
+        (self.init_fn)(device, queue, surface_config)
+    }
+
+    pub fn reconfigure(&self, elem_renderer: &mut dyn ElemRendObjS, surface_config: &wgpu::SurfaceConfiguration) {
+        (self.reconfigure_fn)(elem_renderer, surface_config)
+    }
+
+    pub fn submit_to_render(
+        &self,
+        elem_renderer: &mut dyn ElemRendObjS,
+        elem: &dyn ElemObjS,
+        engine: &rhai::Engine,
+        scope: rhai::Scope<'static>,
+        asset_manager: &AssetManager,
+        render_pass: &mut wgpu::RenderPass
+    ) -> anyhow::Result<()> {
+        (self.submit_to_render_fn)(elem_renderer, elem, engine, scope, asset_manager, render_pass)
+    }
+
+    pub fn finish_render(&self, elem_renderer: &mut dyn ElemRendObjS, render_pass: &mut wgpu::RenderPass) {
+        (self.finish_render_fn)(elem_renderer, render_pass)
+    }
 }
 
 pub struct RegisteredElements {
@@ -150,7 +191,7 @@ pub struct RegisteredElements {
 
 impl std::fmt::Debug for RegisteredElements {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "RegisteredElements[{}]", self.element_types.keys().cloned().reduce(|mut a, e| {a.push_str(&e); a}).unwrap_or(String::new()))
+        write!(f, "RegisteredElements[{}]", self.element_types.iter().map(|(k, v)| format!("{}: {:?}", k, v.own_type_id)).reduce(|mut a, e| {a.push_str(&e); a}).unwrap_or(String::new()))
     }
 }
 
@@ -164,6 +205,6 @@ impl RegisteredElements {
     }
 
     pub fn register_element_renderer<T: ElementRenderer + 'static>(&mut self) {
-        self.element_renderer.insert(TypeId::of::<T>(), RegisteredElementRenderer::new::<T>());
+        self.element_renderer.insert(TypeId::of::<T::Element>(), RegisteredElementRenderer::new::<T>());
     }
 }

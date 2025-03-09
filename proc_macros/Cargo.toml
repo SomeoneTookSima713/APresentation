@@ -1,0 +1,14 @@
+[package]
+name = "proc_macros"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0"
+proc-macro2 = "1.0"
+quote = "1.0"
+parking_lot = "0.12"
+rand = "*"

@@ -4,14 +4,14 @@
 
 ---
 // This creates a new slide
-slide "MySlide" (1.0, 1.0, 1.0)
+slide "MySlide" (0.1, 0.1, 0.13)
 // This creates a new Rect element
 newelem "ColorRect" Rect (
-    position: (100, Rhai("h * 0.5")),
+    position: (0, Rhai("h * 0.5")),
     size: (Rhai("0.5*w"), 200),
     anchor: TopRight,
     alignment: MidRight,
-    source: Color(1.0, 0.5, 0.0, 1.0),
+    source: Rhai("RectSource::Color(1.0, (t/2.0) % 1.0, 0.0, 1.0)"),
     corner_rounding: Circle {
         top_left: 1.0,
         top_right: 0.5,

@@ -5,16 +5,29 @@ pub mod alignment;
 pub mod base;
 
 #[derive(Clone)]
-pub enum Property<T: PropertyCompatible> {
+pub enum Property<T: PropertyCompatible + 'static> {
     Literal(T::InnerRepresentation),
     Script(rhai::AST)
 }
 
+impl<T: PropertyCompatible> std::fmt::Debug for Property<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Literal(_) => write!(f, "Property<{}>::Literal", std::any::type_name::<T>()),
+            Self::Script(_) => write!(f, "Property<{}>::Script", std::any::type_name::<T>()),
+        }
+    }
+}
+
 impl<T: PropertyCompatible> Property<T> {
+    #[tracing::instrument(skip(scope, engine))]
     pub fn evaluate(&self, scope: &mut rhai::Scope<'static>, engine: &rhai::Engine) -> Option<T> {
         match self {
             Self::Literal(v) => Some(T::to_self(v, engine, scope)?),
-            Self::Script(ast) => engine.eval_ast_with_scope::<T>(scope, ast).ok()
+            Self::Script(ast) => match engine.eval_ast_with_scope::<T>(scope, ast) {
+                Ok(v) => Some(v),
+                Err(e) => { tracing::error!("Couldn't evaluate property of type {}: {}", std::any::type_name::<T>(), e); None }
+            }
         }
     }
 
@@ -37,37 +50,76 @@ impl<T: PropertyCompatible> Property<T> {
     }
 }
 
-pub trait PropertyCompatible: rhai::Variant + Clone {
+/// Trait that allows a type to be used in the [`Property`] struct.
+/// 
+/// This makes it possible to easily parse complex data from a presentation
+/// file with minimal code.
+/// 
+/// # Using in Rhai Code snippets
+/// If you want to be able to construct or use this type in Rhai code snippets
+/// inside the presentation, you have to annotate your implementation with the
+/// [`proc_macros::register_impl`] macro, giving the fully qualified path to
+/// your struct as an argument. Here's an example:
+/// ```rust
+/// #[derive(Clone)]
+/// pub struct MyProperty {
+///     foo: usize,
+///     bar: String
+/// }
+/// 
+/// struct MyUncomputedProperty {
+///     foo: Property<usize>,
+///     bar: Property<String>
+/// }
+/// 
+/// // If your type isn't inside the `apresentation` crate,
+/// // you need to replace `crate` with your crate name
+/// #[proc_macros::register_impl(crate::elements::my_elem::MyProperty)]
+/// impl PropertyCompatible for MyProperty {
+///     type InnerRepresentation = MyUncomputedProperty;
+/// 
+///     fn from_value(...) -> Option<Self::InnerRepresentation> { ... }
+/// 
+///     fn to_self(...) -> Option<Self> { ... }
+/// 
+///     fn build_custom_rhai_type(...) { ... }
+/// }
+/// ```
+pub trait PropertyCompatible: Clone {
+    /// The inner representation of this property.
+    /// 
+    /// Due to the fact that nested values (e.g. in lists or maps) can be a
+    /// code snippet themselves, there can potentially be infinite layers of
+    /// uncomputed values that need to be computed at runtime. Due to this,
+    /// an intermediate representation of the properties is needed, in which
+    /// this information about nested uncomputed values is stored. This type is
+    /// exactly that.
+    /// 
+    /// In practice, this means that this type should be an exact replica of
+    /// the actual type implementing the trait, with the difference of each
+    /// stored value's type being wrapped in a [`Property`]. This allows each
+    /// nested value to have the possibility of being a dynamically evaluated
+    /// value, which solves the problem stated above.
+    /// 
+    /// This type gets constructed in [`from_value()`](PropertyCompatible::from_value)
+    /// and converted into the actual property type in
+    /// [`to_self()`](PropertyCompatible::to_self).
     type InnerRepresentation;
 
-    /// Tries to convert from the generic [`Value`] enum to the more specific
-    /// implementor of this trait. Contrary to the fact that a [`rhai::Engine`]
-    /// is supplied as an argument, this method doesn't normally need to handle
-    /// [`Value::RhaiCode`], because that is already handled in
-    /// [`Property::from_value()`]. Only if you need to convert additional
-    /// `Value`s you have to use it.
+    /// Tries to convert from the generic [`Value`] enum to the inner
+    /// representation of this type.
     fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self::InnerRepresentation>
     where Self: Sized;
 
+    /// Tries to convert the inner representation to the actual property type.
     fn to_self(base: &Self::InnerRepresentation, engine: &rhai::Engine, scope: &mut rhai::Scope<'static>) -> Option<Self>
     where Self: Sized;
 
-    // This method shouldn't be necessary, but I'm keeping the code here just in case.
-    // 
-    // /// Either tries to evaluate rhai code to the type implementing this trait,
-    // /// or tries to construct it from a [`Value`].
-    // /// 
-    // /// It is recommended to use this method over
-    // /// [`PropertyCompatible::from_value()`], as that method doesn't account
-    // /// for the [`Value::RhaiCode`] variant and thus wouldn't return anything
-    // /// when encountering rhai code.
-    // fn from_value_or_rhai(val: Value, scope: &mut rhai::Scope<'static>, engine: &rhai::Engine) -> Option<Self>
-    // where Self: Sized {
-    //     match val {
-    //         Value::RhaiCode(c) => engine.eval_expression_with_scope(scope, &c).ok(),
-    //         v => Self::from_value(v)
-    //     }
-    // }
+    /// Function declaring how this type should look like when used in a Rhai
+    /// code snippet.
+    #[allow(unused_variables)]
+    fn build_custom_rhai_type() -> Option<(String, rhai::Module)>
+    where Self: Sized + 'static { None }
 }
 
 mod prop_comp_impls {
@@ -134,7 +186,7 @@ mod prop_comp_impls {
         where Self: Sized { Some(base.clone()) }
     }
 
-    impl<T: PropertyCompatible> PropertyCompatible for Option<T> {
+    impl<T: PropertyCompatible + 'static> PropertyCompatible for Option<T> {
         type InnerRepresentation = Option<super::Property<T>>;
 
         fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self::InnerRepresentation>
@@ -155,7 +207,7 @@ mod prop_comp_impls {
         }
     }
 
-    impl<T: PropertyCompatible> PropertyCompatible for Vec<T> {
+    impl<T: PropertyCompatible + 'static> PropertyCompatible for Vec<T> {
         type InnerRepresentation = Vec<super::Property<T>>;
 
         fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self::InnerRepresentation>
@@ -206,7 +258,7 @@ mod prop_comp_impls {
         = (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
     #[impl_trait_for_tuples::impl_for_tuples(1, 4)]
     impl PropertyCompatible for Tuple {
-        for_tuples!( where #( Tuple: PropertyCompatible )* );
+        for_tuples!( where #( Tuple: PropertyCompatible + 'static )* );
 
         for_tuples!( type InnerRepresentation = ( #(super::Property<Tuple>),* ); );
 
@@ -233,7 +285,7 @@ mod prop_comp_impls {
         }
     }
 
-    impl<T: PropertyCompatible, const N: usize> PropertyCompatible for [T; N] {
+    impl<T: PropertyCompatible + 'static, const N: usize> PropertyCompatible for [T; N] {
         type InnerRepresentation = [super::Property<T>; N];
 
         fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self::InnerRepresentation>

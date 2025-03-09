@@ -12,20 +12,6 @@ use parser::data::Value;
 pub mod assets;
 pub use assets::*;
 
-// Example definition:
-// Rect (
-//     position: (100, Rhai("h * 0.5")),
-//     anchor: TopRight,
-//     alignment: MidRight,
-//     source: Color(1.0, 0.5, 0.0, 1.0),
-//     corner_rounding: Circle(
-//         top_left: 1.0,
-//         top_right: 0.5,
-//         bottom_left: 1.0,
-//         bottom_right: 0.5
-//     )
-// )
-
 pub struct Rect {
     base_properties: BaseProperties,
     size: Property<(f64, f64)>,
@@ -77,6 +63,14 @@ impl PropertyCompatible for RectSource {
             ),
             UncomputedRectSource::Image(s) => Self::Image(s.evaluate(scope, engine)?)
         })
+    }
+
+    fn build_custom_rhai_type() -> Option<(String, rhai::Module)>
+    where Self: Sized + 'static {
+        let mut module = rhai::Module::new();
+        module.set_native_fn("Color", |r: f64, g: f64, b: f64, a: f64| Ok(Self::Color(r, g, b, a)));
+        module.set_native_fn("Image", |s: rhai::ImmutableString| Ok(Self::Image(s.into_owned())));
+        Some(("RectSource".to_string(), module))
     }
 }
 
@@ -144,6 +138,14 @@ impl PropertyCompatible for CornerRounding {
             }
         })
     }
+
+    fn build_custom_rhai_type() -> Option<(String, rhai::Module)>
+    where Self: Sized + 'static {
+        let mut module = rhai::Module::new();
+        module.set_native_fn("Squircle", |tl: f64, tr: f64, bl: f64, br: f64| Ok(Self::Squircle { top_left: tl, top_right: tr, bottom_left: bl, bottom_right: br }));
+        module.set_native_fn("Circle", |tl: f64, tr: f64, bl: f64, br: f64| Ok(Self::Circle { top_left: tl, top_right: tr, bottom_left: bl, bottom_right: br }));
+        Some(("CornerRounding".to_string(), module))
+    }
 }
 
 impl BasePropertiesProvider for Rect {
@@ -184,8 +186,8 @@ impl Vertex {
     pub const RECT_VERTS: &[Self] = &[
         Self::new([-0.5, -0.5], [0.0, 1.0]),
         Self::new([ 0.5, -0.5], [1.0, 1.0]),
+        Self::new([-0.5,  0.5], [0.0, 0.0]),
         Self::new([ 0.5,  0.5], [1.0, 0.0]),
-        Self::new([-0.5,  0.5], [0.0, 0.0])
     ];
 
     pub const fn new(pos: [f32; 2], tex_coords: [f32; 2]) -> Self {
@@ -234,6 +236,18 @@ struct PushConstant {
     window_res: [u32; 2]
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CameraUniform {
+    matrix: [[f32; 4]; 4]
+}
+
+impl CameraUniform {
+    pub fn set(&mut self, new: nalgebra::Matrix4<f32>) {
+        self.matrix = new.data.0;
+    }
+}
+
 /// Concept for the render model:
 /// 
 /// We have one big bind group containing all the textures needed for the
@@ -246,6 +260,8 @@ pub struct RectRenderer {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     instance_buffer: wgpu::Buffer,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
     push_constant: PushConstant,
     push_constant_start: u32,
     /// A white dummy texture for rectangles not using an image.
@@ -262,13 +278,15 @@ pub struct RectRenderer {
     current_rect_instances: Vec<Instance>
 }
 
+static CAMERA_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
+
 static IMAGE_ARR_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
 const IMAGE_ARR_MAX_ITEMS: std::num::NonZero<u32> = std::num::NonZero::<u32>::new(128).unwrap();
 
 const INSTANCE_BUFFER_BASE_SIZE: wgpu::BufferAddress = 16; // wgpu::BufferAddress currently coerces to u64 (wgpu version 24.0.1)
 
 const DUMMY_TEXTURE_DIMENSIONS: (u32, u32) = (8,8);
-const DUMMY_TEXTURE_DATA: &[f32] = &[1.0; 4*(DUMMY_TEXTURE_DIMENSIONS.0 as usize)*(DUMMY_TEXTURE_DIMENSIONS.1 as usize)];
+const DUMMY_TEXTURE_DATA: &[u8] = &[255u8; 4*(DUMMY_TEXTURE_DIMENSIONS.0 as usize)*(DUMMY_TEXTURE_DIMENSIONS.1 as usize)];
 
 impl ElementRenderer for RectRenderer {
     type Element = Rect;
@@ -279,7 +297,18 @@ impl ElementRenderer for RectRenderer {
 
         use wgpu::util::{ BufferInitDescriptor, DeviceExt };
 
-        let set_succeeded = IMAGE_ARR_BIND_GROUP_LAYOUT.set(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let mut set_succeeded = CAMERA_BIND_GROUP_LAYOUT.set(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Rect Caera Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None
+                }
+            ]
+        })).is_err();
+        set_succeeded = set_succeeded || IMAGE_ARR_BIND_GROUP_LAYOUT.set(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Rect Image Array Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -287,7 +316,7 @@ impl ElementRenderer for RectRenderer {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false
                     },
                     count: Some(IMAGE_ARR_MAX_ITEMS)
@@ -305,8 +334,10 @@ impl ElementRenderer for RectRenderer {
                     count: None
                 },
             ]
-        }));
-        if set_succeeded.is_err() {
+        })).is_err();
+        if set_succeeded {
+            // This theoretically isn't problematic (unless you actually render using a different
+            // adapter), so we only print an error and continue.
             tracing::error!("Multiple RectRenderer instances were initialised!");
         }
 
@@ -315,7 +346,10 @@ impl ElementRenderer for RectRenderer {
         let push_constant_range = PUSH_CONSTANT_MANAGER.get_range(8);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[IMAGE_ARR_BIND_GROUP_LAYOUT.get().expect("Asset types should be inited before renderers!")],
+            bind_group_layouts: &[
+                IMAGE_ARR_BIND_GROUP_LAYOUT.get().expect("Unreachable"),
+                CAMERA_BIND_GROUP_LAYOUT.get().expect("Unreachable")
+            ],
             push_constant_ranges: &[wgpu::PushConstantRange {
                 stages: wgpu::ShaderStages::VERTEX,
                 range: push_constant_range.clone()
@@ -360,6 +394,31 @@ impl ElementRenderer for RectRenderer {
             cache: None
         });
 
+        let camera_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Rect Renderer Camera Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[CameraUniform {
+                matrix: nalgebra::Orthographic3::new(
+                    0.0,
+                    surface_config.width as f32,
+                    surface_config.height as f32,
+                    0.0,
+                    1000.0,
+                    -1.0,
+                ).as_matrix().data.0
+            }]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST
+        });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Rect Renderer Camera Uniform Bind Group"),
+            layout: &CAMERA_BIND_GROUP_LAYOUT.get().expect("Unreachable"),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(camera_buffer.as_entire_buffer_binding())
+                }
+            ]
+        });
+
         let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Rect Renderer Vertex Buffer"),
             contents: bytemuck::cast_slice(Vertex::RECT_VERTS),
@@ -382,11 +441,14 @@ impl ElementRenderer for RectRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[]
         });
-        let dummy_texture_view = dummy_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let dummy_texture_view = dummy_texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
         queue.write_texture(
             wgpu::TexelCopyTextureInfoBase {
                 texture: &dummy_texture,
@@ -397,7 +459,7 @@ impl ElementRenderer for RectRenderer {
             bytemuck::cast_slice(DUMMY_TEXTURE_DATA),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(16 * size.width),
+                bytes_per_row: Some(4 * size.width),
                 rows_per_image: Some(size.height)
             },
             size
@@ -447,6 +509,8 @@ impl ElementRenderer for RectRenderer {
             render_pipeline,
             vertex_buffer,
             instance_buffer,
+            camera_buffer,
+            camera_bind_group,
             push_constant,
             push_constant_start: push_constant_range.start,
             dummy_texture: (dummy_texture, dummy_texture_view),
@@ -461,6 +525,17 @@ impl ElementRenderer for RectRenderer {
 
     fn reconfigure(&mut self, surface_config: &wgpu::SurfaceConfiguration) {
         self.push_constant.window_res = [surface_config.width, surface_config.height];
+
+        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[CameraUniform {
+            matrix: nalgebra::Orthographic3::new(
+                0.0,
+                surface_config.width as f32,
+                surface_config.height as f32,
+                0.0,
+                1000.0,
+                -1.0,
+            ).as_matrix().data.0
+        }]));
     }
 
     fn submit_to_render(
@@ -486,10 +561,27 @@ impl ElementRenderer for RectRenderer {
             => (false, [top_left as f32, top_right as f32, bottom_left as f32, bottom_right as f32]),
         };
 
+        let anchor = element.base_properties.anchor.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("anchor"))?;
+        let align = element.base_properties.alignment.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("alignment"))?;
+
+        let final_pos = (
+            self.push_constant.window_res[0] as f64 * anchor.into_fracts().0 + pos.0 - size.0 * (align.into_fracts().0 - 0.5),
+            self.push_constant.window_res[1] as f64 * anchor.into_fracts().1 + pos.1 - size.1 * (align.into_fracts().1 - 0.5),
+        );
+
+        tracing::info!("{:?}, {:?}", pos, nalgebra::Orthographic3::new(
+            0.0,
+            self.push_constant.window_res[0] as f64,
+            self.push_constant.window_res[1] as f64,
+            0.0,
+            1000.0,
+            -1.0
+        ).as_matrix() * nalgebra::Vector4::new(pos.0, pos.1, 0.0, 1.0));
+
         match source {
             RectSource::Color(r, g, b, a) => {
                 self.current_rect_instances.push(Instance::new(
-                    [pos.0 as f32, pos.1 as f32, z as f32],
+                    [final_pos.0 as f32, final_pos.1 as f32, z as f32],
                     [size.0 as f32, size.1 as f32],
                     [r as f32, g as f32, b as f32, a as f32],
                     0,
@@ -569,6 +661,7 @@ impl ElementRenderer for RectRenderer {
 
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.image_bind_group, &[]);
+        render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..instance_data_bytes.len() as wgpu::BufferAddress));
         render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, self.push_constant_start, bytemuck::cast_slice(&[self.push_constant]));
