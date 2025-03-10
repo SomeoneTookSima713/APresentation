@@ -11,7 +11,7 @@ newelem "ColorRect" Rect (
     size: (Rhai("0.5*w"), 200),
     anchor: TopRight,
     alignment: MidRight,
-    source: Rhai("RectSource::Color(1.0, (t/2.0) % 1.0, 0.0, 1.0)"),
+    source: Image("test.png"),
     corner_rounding: Circle {
         top_left: 1.0,
         top_right: 0.5,

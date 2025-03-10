@@ -569,15 +569,6 @@ impl ElementRenderer for RectRenderer {
             self.push_constant.window_res[1] as f64 * anchor.into_fracts().1 + pos.1 - size.1 * (align.into_fracts().1 - 0.5),
         );
 
-        tracing::info!("{:?}, {:?}", pos, nalgebra::Orthographic3::new(
-            0.0,
-            self.push_constant.window_res[0] as f64,
-            self.push_constant.window_res[1] as f64,
-            0.0,
-            1000.0,
-            -1.0
-        ).as_matrix() * nalgebra::Vector4::new(pos.0, pos.1, 0.0, 1.0));
-
         match source {
             RectSource::Color(r, g, b, a) => {
                 self.current_rect_instances.push(Instance::new(
@@ -603,7 +594,7 @@ impl ElementRenderer for RectRenderer {
                 self.needed_images.push((id, view));
 
                 self.current_rect_instances.push(Instance::new(
-                    [pos.0 as f32, pos.1 as f32, z as f32],
+                    [final_pos.0 as f32, final_pos.1 as f32, z as f32],
                     [size.0 as f32, size.1 as f32],
                     [1.0,1.0,1.0,1.0],
                     tex_ind as u32,
@@ -623,6 +614,7 @@ impl ElementRenderer for RectRenderer {
             let mut views = Vec::with_capacity(self.needed_images.len() + 1);
             views.push(&self.dummy_texture.1);
             for img in self.needed_images.iter() {
+                println!("{}", img.0);
                 views.push(&img.1);
             }
             self.image_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
