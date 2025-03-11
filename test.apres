@@ -11,8 +11,8 @@ newelem "ColorRect" Rect (
     size: (Rhai("0.5*w"), 200),
     anchor: TopRight,
     alignment: MidRight,
-    source: Image("test.png"),
-    corner_rounding: Squircle {
+    source: Rhai("RectSource::Image(\"test.png\", SamplerType::Linear())"),
+    corner_rounding: {
         top_left: 1.0,
         top_right: 0.5,
         bottom_left: 1.0,

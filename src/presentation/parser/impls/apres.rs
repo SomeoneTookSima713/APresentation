@@ -209,6 +209,8 @@ impl<'a> ApresParser<'a> {
         let mut token_start: usize = 0;
         let mut token_location: FileLocation = FileLocation { line: 0, column: 0 };
 
+        let mut last_char: char = '\0';
+
         let mut in_string = false;
         let mut is_multiline_string = false;
         let mut string_quote_type: char = '"';
@@ -227,14 +229,17 @@ impl<'a> ApresParser<'a> {
 
             if in_singleline_comment {
                 in_singleline_comment = c != '\n';
+                last_char = c;
                 continue;
             } else if in_multiline_comment {
                 if c == '*' && self.erroring_peek(col, line)?.1 == '/' {
                     in_multiline_comment = false;
                     self.advance();
                 }
+                last_char = c;
                 continue;
             } else if in_string {
+                // tracing::debug!("In String! {c}");
                 if is_multiline_string {
                     if c == string_quote_type && self.erroring_peek(col, line)?.1 == string_quote_type {
                         self.advance();
@@ -243,18 +248,20 @@ impl<'a> ApresParser<'a> {
                             in_string = false;
                         }
                     }
-                } else if c == string_quote_type {
+                } else if c == string_quote_type && last_char != '\\' {
                     self.push_token((Token::Literal(Literal::String(&self.file[token_start+1..i], false)), token_location));
                     in_string = false;
                 } else if c == '\n' {
                     Err(TokenizerError::new(col, line, TokenizerErrorKind::UnexpectedEOF))?;
                 }
+                last_char = c;
                 continue;
             } else if in_digit {
                 if !(c.is_ascii_digit() || c == '.' || c == '-') {
                     self.push_token((Token::Literal(Literal::Number(&self.file[token_start..i])), token_location));
                     in_digit = false;
                 } else {
+                    last_char = c;
                     continue;
                 }
             } else if in_ident {
@@ -269,11 +276,15 @@ impl<'a> ApresParser<'a> {
                     }
                     in_ident = false;
                 } else {
+                    last_char = c;
                     continue;
                 }
             }
 
-            if c.is_whitespace() { continue; }
+            if c.is_whitespace() {
+                last_char = c;
+                continue;
+            }
 
             match c {
                 // Comment handling
@@ -311,8 +322,18 @@ impl<'a> ApresParser<'a> {
                 c if let Ok(p) = Punctuation::try_from(c) => {
                     self.push_token((Token::Punctuation(p), FileLocation { line, column: col }));
                 },
-                c => Err(TokenizerError::new(col, line, TokenizerErrorKind::UnexpectedChar(c)))?
+                c => {
+                    tracing::debug!(
+                        ?in_string,
+                        ?is_multiline_string,
+                        ?string_quote_type,
+                        ?in_digit,
+                        ?in_ident
+                    );
+                    Err(TokenizerError::new(col, line, TokenizerErrorKind::UnexpectedChar(c)))?
+                }
             }
+            last_char = c;
         }
 
         if in_string {
@@ -488,6 +509,31 @@ impl<'a> ApresParser<'a> {
         Ok(map)
     }
 
+    fn process_string(string: &str, multiline: bool) -> String {
+        // Converts any escape sequences inside the string from the
+        // source file with the actual escaped characters.
+        let string_processed = string
+            .replace("\r", "")
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\t", "\t")
+            .replace("\\'", "'")
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\");
+        // If a multiline string starts or ends with a line break, we remove it.
+        let start_ind = if multiline && string.starts_with("\n") { 1 } else { 0 };
+        let end_ind = if multiline && string.ends_with("\n") { string_processed.len()-1 } else { string_processed.len() };
+
+        let str_starting_tabs = string_processed[start_ind..].find(|c| c != ' ').unwrap_or(0);
+        let tab_str = ['\n'].into_iter().chain(std::iter::repeat_n(' ', str_starting_tabs)).collect::<String>();
+
+        // Gets the slice out of the string without the newlines that
+        // may exist at the start and end and removes spaces at the
+        // start of every line based on the amount of the first line.
+        string_processed[start_ind+str_starting_tabs..end_ind]
+            .replace(&tab_str, "\n")
+    }
+
     #[tracing::instrument]
     fn tokens_to_value(tokens: &'a [Token<'a>]) -> Result<Value, ParserError> {
         let token_amount = tokens.len();
@@ -496,41 +542,16 @@ impl<'a> ApresParser<'a> {
         if token_amount == 4 && let [
             Token::Identifier("Rhai"),
             Token::Punctuation(Punctuation::OpeningParen),
-            Token::Literal(Literal::String(s, _multiline)),
+            Token::Literal(Literal::String(s, multiline)),
             Token::Punctuation(Punctuation::ClosingParen),
         ] = &tokens[0..token_amount] {
-            // Luckily, we can delegate all the string parsing logic to the
-            // Rhai compiler, so we can just return the source string here :)
-            return Ok(Value::RhaiCode(s.to_string()))
+            return Ok(Value::RhaiCode(Self::process_string(s, *multiline)))
         }
 
         match &tokens[0] {
             Token::Literal(Literal::Boolean(b)) => Ok(Value::Bool(*b)),
             Token::Literal(Literal::String(s, multiline)) => {
-                // Converts any escape sequences inside the string from the
-                // source file with the actual escaped characters.
-                let string_processed = s
-                    .replace("\r", "")
-                    .replace("\\n", "\n")
-                    .replace("\\r", "\r")
-                    .replace("\\t", "\t")
-                    .replace("\\'", "'")
-                    .replace("\\\"", "\"")
-                    .replace("\\\\", "\\");
-                // If a multiline string starts or ends with a line break, we remove it.
-                let start_ind = if *multiline && s.starts_with("\n") { 1 } else { 0 };
-                let end_ind = if *multiline && s.ends_with("\n") { string_processed.len()-1 } else { string_processed.len() };
-
-                let str_starting_tabs = string_processed[start_ind..].find(|c| c != ' ').unwrap_or(0);
-                let tab_str = ['\n'].into_iter().chain(std::iter::repeat_n(' ', str_starting_tabs)).collect::<String>();
-
-                // Gets the slice out of the string without the newlines that
-                // may exist at the start and end and removes spaces at the
-                // start of every line based on the amount of the first line.
-                let string_final = string_processed[start_ind+str_starting_tabs..end_ind]
-                    .replace(&tab_str, "\n");
-
-                Ok(Value::String(string_final))
+                Ok(Value::String(Self::process_string(s, *multiline)))
             },
             Token::Literal(Literal::Number(numstr)) => {
                 match (numstr.parse::<i64>(), numstr.parse::<f64>()) {

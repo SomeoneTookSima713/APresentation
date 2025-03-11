@@ -12,7 +12,7 @@ struct Instance {
     @location(2) pos: vec3<f32>,
     @location(3) size: vec2<f32>,
     @location(4) color: vec4<f32>,
-    @location(5) texture_ind_and_rounding_type: u32,
+    @location(5) texture_ind: u32,
     @location(6) rounding: vec4<f32>,
 }
 
@@ -41,8 +41,7 @@ fn vs_main(
     out.clip_position = camera_uniform * vec4<f32>(vert_pos.x + pos_offset.x, vert_pos.y + pos_offset.y, instance.pos.z, 1.0);
 
     out.color = instance.color;
-    out.texture_ind = instance.texture_ind_and_rounding_type & 0x7FFFFFFFu;
-    out.rounding_type = (instance.texture_ind_and_rounding_type & 0x80000000u) >> 31u;
+    out.texture_ind = instance.texture_ind;
     out.rounding = instance.rounding;
 
     out.tex_coords = vertex.tex_coords;

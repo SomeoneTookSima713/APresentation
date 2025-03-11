@@ -95,10 +95,12 @@ impl Presentation {
             .set_max_call_levels(64)
             // .set_optimization_level(rhai::OptimizationLevel::Full)
             .set_strict_variables(false);
+        // TODO: Find a more modular way of doing this
         proc_macros::for_types!(
             element::property::alignment::Alignment,
             crate::elements::rect::RectSource,
-            crate::elements::rect::CornerRounding
+            crate::elements::rect::CornerRounding,
+            crate::elements::rect::SamplerType,
             => {
                 if let Some((modname, module)) = <Implementor as element::property::PropertyCompatible>::build_custom_rhai_type() {
                     rhai_engine.register_static_module(modname.as_str(), std::rc::Rc::new(module));

@@ -19,16 +19,52 @@ pub struct Rect {
     corner_rounding: Property<CornerRounding>
 }
 
+#[derive(Clone, Copy)]
+pub enum SamplerType {
+    Linear,
+    Nearest
+}
+
+impl PropertyCompatible for SamplerType {
+    type InnerRepresentation = Self;
+
+    fn from_value(val: Value, _engine: &rhai::Engine) -> Option<Self::InnerRepresentation>
+    where Self: Sized {
+        if let Value::EnumVariant(variant, None) = val {
+            match variant.as_str() {
+                "Linear" => Some(Self::Linear),
+                "Nearest" => Some(Self::Nearest),
+                _ => None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn to_self(base: &Self::InnerRepresentation, _engine: &rhai::Engine, _scope: &mut rhai::Scope<'static>) -> Option<Self>
+    where Self: Sized {
+        Some(*base)
+    }
+
+    fn build_custom_rhai_type() -> Option<(String, rhai::Module)>
+    where Self: Sized + 'static {
+        let mut module = rhai::Module::new();
+        module.set_native_fn("Linear", || Ok(Self::Linear));
+        module.set_native_fn("Nearest", || Ok(Self::Nearest));
+        module.set_custom_type::<Self>("SamplerType");
+        Some(("SamplerType".to_string(), module))
+    }
+}
 
 #[derive(Clone)]
 pub enum RectSource {
     Color(f64, f64, f64, f64),
-    Image(String)
+    Image(String, SamplerType)
 }
 
 pub enum UncomputedRectSource {
     Color([Property<f64>; 4]),
-    Image(Property<String>)
+    Image(Property<String>, Property<SamplerType>)
 }
 
 impl PropertyCompatible for RectSource {
@@ -43,7 +79,8 @@ impl PropertyCompatible for RectSource {
                     UncomputedRectSource::Color([col.0, col.1, col.2, col.3])
                 },
                 "Image" => {
-                    UncomputedRectSource::Image(<(String,) as PropertyCompatible>::from_value(v, engine)?.0)
+                    let p = <(String, SamplerType) as PropertyCompatible>::from_value(v, engine)?;
+                    UncomputedRectSource::Image(p.0, p.1)
                 },
                 _ => None?
             })
@@ -61,7 +98,7 @@ impl PropertyCompatible for RectSource {
                 b.evaluate(scope, engine)?,
                 a.evaluate(scope, engine)?
             ),
-            UncomputedRectSource::Image(s) => Self::Image(s.evaluate(scope, engine)?)
+            UncomputedRectSource::Image(src, sampler) => Self::Image(src.evaluate(scope, engine)?, sampler.evaluate(scope, engine)?)
         })
     }
 
@@ -69,53 +106,33 @@ impl PropertyCompatible for RectSource {
     where Self: Sized + 'static {
         let mut module = rhai::Module::new();
         module.set_native_fn("Color", |r: f64, g: f64, b: f64, a: f64| Ok(Self::Color(r, g, b, a)));
-        module.set_native_fn("Image", |s: rhai::ImmutableString| Ok(Self::Image(s.into_owned())));
+        module.set_native_fn("Image", |src: rhai::ImmutableString, sampler: SamplerType| Ok(Self::Image(src.into_owned(), sampler)));
         Some(("RectSource".to_string(), module))
     }
 }
 
 #[derive(Clone, Copy)]
-pub enum CornerRounding {
-    Squircle {
-        top_left: f64,
-        top_right: f64,
-        bottom_left: f64,
-        bottom_right: f64,
-    },
-    Circle {
-        top_left: f64,
-        top_right: f64,
-        bottom_left: f64,
-        bottom_right: f64,
-    }
+pub struct CornerRounding {
+    top_left: f64,
+    top_right: f64,
+    bottom_left: f64,
+    bottom_right: f64,
 }
 
-pub enum UncomputedCornerRounding {
-    Squircle([Property<f64>; 4]),
-    Circle([Property<f64>; 4])
-}
+pub struct UncomputedCornerRounding([Property<f64>; 4]);
 
 impl PropertyCompatible for CornerRounding {
     type InnerRepresentation = UncomputedCornerRounding;
 
     fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self::InnerRepresentation>
     where Self: Sized {
-        if let Value::EnumVariant(variant, v) = val && let Some(Value::Map(map)) = v.map(Box::into_inner) {
-            Some(match variant.as_str() {
-                "Squircle" => UncomputedCornerRounding::Squircle([
-                    Property::from_value(map.get("top_left")?.clone(), engine)?,
-                    Property::from_value(map.get("top_right")?.clone(), engine)?,
-                    Property::from_value(map.get("bottom_left")?.clone(), engine)?,
-                    Property::from_value(map.get("bottom_right")?.clone(), engine)?,
-                ]),
-                "Circle" => UncomputedCornerRounding::Circle([
-                    Property::from_value(map.get("top_left")?.clone(), engine)?,
-                    Property::from_value(map.get("top_right")?.clone(), engine)?,
-                    Property::from_value(map.get("bottom_left")?.clone(), engine)?,
-                    Property::from_value(map.get("bottom_right")?.clone(), engine)?,
-                ]),
-                _ => None?
-            })
+        if let Value::Map(map) = val {
+            Some(UncomputedCornerRounding([
+                Property::from_value(map.get("top_left")?.clone(), engine)?,
+                Property::from_value(map.get("top_right")?.clone(), engine)?,
+                Property::from_value(map.get("bottom_left")?.clone(), engine)?,
+                Property::from_value(map.get("bottom_right")?.clone(), engine)?,
+            ]))
         } else {
             None
         }
@@ -123,27 +140,18 @@ impl PropertyCompatible for CornerRounding {
 
     fn to_self(base: &Self::InnerRepresentation, engine: &rhai::Engine, scope: &mut rhai::Scope<'static>) -> Option<Self>
     where Self: Sized {
-        Some(match base {
-            UncomputedCornerRounding::Squircle([tl, tr, bl, br]) => Self::Squircle {
-                top_left: tl.evaluate(scope, engine)?,
-                top_right: tr.evaluate(scope, engine)?,
-                bottom_left: bl.evaluate(scope, engine)?,
-                bottom_right: br.evaluate(scope, engine)?
-            },
-            UncomputedCornerRounding::Circle([tl, tr, bl, br]) => Self::Circle {
-                top_left: tl.evaluate(scope, engine)?,
-                top_right: tr.evaluate(scope, engine)?,
-                bottom_left: bl.evaluate(scope, engine)?,
-                bottom_right: br.evaluate(scope, engine)?
-            }
+        Some(Self {
+            top_left: base.0[0].evaluate(scope, engine)?,
+            top_right: base.0[1].evaluate(scope, engine)?,
+            bottom_left: base.0[2].evaluate(scope, engine)?,
+            bottom_right: base.0[3].evaluate(scope, engine)?
         })
     }
 
     fn build_custom_rhai_type() -> Option<(String, rhai::Module)>
     where Self: Sized + 'static {
         let mut module = rhai::Module::new();
-        module.set_native_fn("Squircle", |tl: f64, tr: f64, bl: f64, br: f64| Ok(Self::Squircle { top_left: tl, top_right: tr, bottom_left: bl, bottom_right: br }));
-        module.set_native_fn("Circle", |tl: f64, tr: f64, bl: f64, br: f64| Ok(Self::Circle { top_left: tl, top_right: tr, bottom_left: bl, bottom_right: br }));
+        module.set_native_fn("new", |tl: f64, tr: f64, bl: f64, br: f64| Ok(Self { top_left: tl, top_right: tr, bottom_left: bl, bottom_right: br }));
         Some(("CornerRounding".to_string(), module))
     }
 }
@@ -201,7 +209,7 @@ struct Instance {
     pos: [f32; 3],
     size: [f32; 2],
     color: [f32; 4],
-    texture_ind_and_rounding_type: u32,
+    texture_ind: u32,
     rounding: [f32; 4]
 }
 
@@ -223,10 +231,9 @@ impl Instance {
         size: [f32; 2],
         color: [f32; 4],
         texture_ind: u32,
-        rounding_type_is_circle: bool,
         rounding: [f32; 4]
     ) -> Self {
-        Self { pos, size, color, texture_ind_and_rounding_type: texture_ind | ((rounding_type_is_circle as u32) << 31), rounding }
+        Self { pos, size, color, texture_ind, rounding }
     }
 }
 
@@ -554,11 +561,9 @@ impl ElementRenderer for RectRenderer {
         let z = element.base_properties.z_index.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("z_index"))?;
         let size = element.size.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("size"))?;
         let source = element.source.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("source"))?;
-        let (rounding_type_bool, rounding) = match element.corner_rounding.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("source"))?{
-            CornerRounding::Circle { top_left, top_right, bottom_left, bottom_right }
-            => (true, [top_left as f32, top_right as f32, bottom_left as f32, bottom_right as f32]),
-            CornerRounding::Squircle { top_left, top_right, bottom_left, bottom_right }
-            => (false, [top_left as f32, top_right as f32, bottom_left as f32, bottom_right as f32]),
+        let rounding = {
+            let CornerRounding { top_left, top_right, bottom_left, bottom_right } = element.corner_rounding.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("source"))?;
+            [top_left as f32, top_right as f32, bottom_left as f32, bottom_right as f32]
         };
 
         let anchor = element.base_properties.anchor.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("anchor"))?;
@@ -576,11 +581,10 @@ impl ElementRenderer for RectRenderer {
                     [size.0 as f32, size.1 as f32],
                     [r as f32, g as f32, b as f32, a as f32],
                     0,
-                    rounding_type_bool,
                     rounding,
                 ));
             },
-            RectSource::Image(id) => {
+            RectSource::Image(id, sampler) => {
                 let view = asset_manager.get_asset::<Image, _>(&id)
                     .ok_or(anyhow::anyhow!("Couldn't load image with ID '{id}'!"))?
                     .view.clone();
@@ -598,7 +602,6 @@ impl ElementRenderer for RectRenderer {
                     [size.0 as f32, size.1 as f32],
                     [1.0,1.0,1.0,1.0],
                     tex_ind as u32,
-                    rounding_type_bool,
                     rounding,
                 ));
             }

@@ -37,14 +37,17 @@ impl<T: PropertyCompatible> Property<T> {
     /// or if rhai code was supplied and a parsing error occured.
     #[tracing::instrument(skip(engine))]
     pub fn from_value(val: Value, engine: &rhai::Engine) -> Option<Self> {
+        tracing::debug!("{:?}", val);
         match val {
-            Value::RhaiCode(c) => Some(Self::Script(match engine.compile_expression(c) {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::error!("Error compiling rhai code: {e}");
-                    None?
-                }
-            })),
+            Value::RhaiCode(c) => {
+                Some(Self::Script(match engine.compile_expression(c) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::error!("Error compiling rhai code: {e}");
+                        None?
+                    }
+                }))
+            },
             v => Some(Self::Literal(T::from_value(v, engine)?))
         }
     }
