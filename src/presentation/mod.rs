@@ -80,6 +80,7 @@ pub enum PresentationCreationError {
 }
 
 impl Presentation {
+    #[tracing::instrument(skip(parser_collection))]
     pub fn new(
         filename: &str,
         registered_elements: element::RegisteredElements,

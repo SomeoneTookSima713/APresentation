@@ -51,7 +51,7 @@ fn vs_main(
 }
 
 @group(0) @binding(0)
-var texture_array: texture_2d_array<f32>;
+var texture_array: binding_array<texture_2d<f32>>;
 @group(0) @binding(1)
 var linear_sampler: sampler;
 @group(0) @binding(2)
@@ -61,5 +61,5 @@ var nearest_sampler: sampler;
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // TODO: Corner rounding implementation
 
-    return in.color * textureSample(texture_array, linear_sampler, in.tex_coords, in.texture_ind);
+    return in.color * textureSample(texture_array[in.texture_ind], linear_sampler, in.tex_coords);
 }

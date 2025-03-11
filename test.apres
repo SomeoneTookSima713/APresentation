@@ -12,7 +12,7 @@ newelem "ColorRect" Rect (
     anchor: TopRight,
     alignment: MidRight,
     source: Image("test.png"),
-    corner_rounding: Circle {
+    corner_rounding: Squircle {
         top_left: 1.0,
         top_right: 0.5,
         bottom_left: 1.0,

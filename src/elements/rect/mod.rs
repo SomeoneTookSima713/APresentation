@@ -184,10 +184,10 @@ impl Vertex {
     };
 
     pub const RECT_VERTS: &[Self] = &[
-        Self::new([-0.5, -0.5], [0.0, 1.0]),
-        Self::new([ 0.5, -0.5], [1.0, 1.0]),
-        Self::new([-0.5,  0.5], [0.0, 0.0]),
-        Self::new([ 0.5,  0.5], [1.0, 0.0]),
+        Self::new([-0.5, -0.5], [0.0, 0.0]),
+        Self::new([ 0.5, -0.5], [1.0, 0.0]),
+        Self::new([-0.5,  0.5], [0.0, 1.0]),
+        Self::new([ 0.5,  0.5], [1.0, 1.0]),
     ];
 
     pub const fn new(pos: [f32; 2], tex_coords: [f32; 2]) -> Self {
@@ -196,7 +196,7 @@ impl Vertex {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
 struct Instance {
     pos: [f32; 3],
     size: [f32; 2],
@@ -316,7 +316,7 @@ impl ElementRenderer for RectRenderer {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false
                     },
                     count: Some(IMAGE_ARR_MAX_ITEMS)
@@ -446,7 +446,7 @@ impl ElementRenderer for RectRenderer {
             view_formats: &[]
         });
         let dummy_texture_view = dummy_texture.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            dimension: Some(wgpu::TextureViewDimension::D2),
             ..Default::default()
         });
         queue.write_texture(
@@ -544,7 +544,7 @@ impl ElementRenderer for RectRenderer {
             eval_engine: &rhai::Engine,
             mut eval_scope: rhai::Scope<'static>,
             asset_manager: &AssetManager,
-            render_pass: &mut wgpu::RenderPass
+            _render_pass: &mut wgpu::RenderPass
     ) -> anyhow::Result<()> {
         fn eval_failed(prop: &str) -> anyhow::Error {
             anyhow::anyhow!("Evaluation of property '{prop}' failed!")

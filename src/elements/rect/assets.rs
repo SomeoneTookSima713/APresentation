@@ -98,7 +98,7 @@ impl AssetType for Image {
         );
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            dimension: Some(wgpu::TextureViewDimension::D2),
             ..Default::default()
         });
         
