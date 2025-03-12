@@ -19,7 +19,7 @@ pub struct Rect {
     corner_rounding: Property<CornerRounding>
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SamplerType {
     Linear,
     Nearest
@@ -209,7 +209,7 @@ struct Instance {
     pos: [f32; 3],
     size: [f32; 2],
     color: [f32; 4],
-    texture_ind: u32,
+    texture_ind_and_sampler: u32,
     rounding: [f32; 4]
 }
 
@@ -226,14 +226,15 @@ impl Instance {
         ]
     };
 
-    pub const fn new(
+    pub fn new(
         pos: [f32; 3],
         size: [f32; 2],
         color: [f32; 4],
         texture_ind: u32,
+        sampler_is_linear: bool,
         rounding: [f32; 4]
     ) -> Self {
-        Self { pos, size, color, texture_ind, rounding }
+        Self { pos, size, color, texture_ind_and_sampler: texture_ind + ((sampler_is_linear as u32) << 31), rounding }
     }
 }
 
@@ -581,6 +582,7 @@ impl ElementRenderer for RectRenderer {
                     [size.0 as f32, size.1 as f32],
                     [r as f32, g as f32, b as f32, a as f32],
                     0,
+                    false,
                     rounding,
                 ));
             },
@@ -602,6 +604,7 @@ impl ElementRenderer for RectRenderer {
                     [size.0 as f32, size.1 as f32],
                     [1.0,1.0,1.0,1.0],
                     tex_ind as u32,
+                    sampler == SamplerType::Linear,
                     rounding,
                 ));
             }
@@ -617,7 +620,6 @@ impl ElementRenderer for RectRenderer {
             let mut views = Vec::with_capacity(self.needed_images.len() + 1);
             views.push(&self.dummy_texture.1);
             for img in self.needed_images.iter() {
-                println!("{}", img.0);
                 views.push(&img.1);
             }
             self.image_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -650,7 +652,7 @@ impl ElementRenderer for RectRenderer {
                 contents: instance_data_bytes,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST
             });
-        }else {
+        } else {
             self.queue.write_buffer(&self.instance_buffer, 0, instance_data_bytes);
         }
 

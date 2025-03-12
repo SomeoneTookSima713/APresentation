@@ -12,7 +12,7 @@ struct Instance {
     @location(2) pos: vec3<f32>,
     @location(3) size: vec2<f32>,
     @location(4) color: vec4<f32>,
-    @location(5) texture_ind: u32,
+    @location(5) texture_ind_and_sampler_type: u32,
     @location(6) rounding: vec4<f32>,
 }
 
@@ -22,7 +22,8 @@ struct VertexOutput {
     @location(1) texture_ind: u32,
     @location(2) rounding_type: u32,
     @location(3) rounding: vec4<f32>,
-    @location(4) tex_coords: vec2<f32>
+    @location(4) tex_coords: vec2<f32>,
+    @location(5) sampler_type: u32
 }
 
 @group(1) @binding(0)
@@ -38,10 +39,11 @@ fn vs_main(
     var vert_pos = vertex.pos.xy * instance.size;
     var pos_offset =  instance.pos.xy;
 
-    out.clip_position = camera_uniform * vec4<f32>(vert_pos.x + pos_offset.x, vert_pos.y + pos_offset.y, instance.pos.z, 1.0);
+    out.clip_position = camera_uniform * vec4<f32>(vert_pos + pos_offset, instance.pos.z, 1.0);
 
     out.color = instance.color;
-    out.texture_ind = instance.texture_ind;
+    out.texture_ind = instance.texture_ind_and_sampler_type & 0x7FFFFFFFu;
+    out.sampler_type = instance.texture_ind_and_sampler_type >> 31u;
     out.rounding = instance.rounding;
 
     out.tex_coords = vertex.tex_coords;
@@ -59,6 +61,9 @@ var nearest_sampler: sampler;
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // TODO: Corner rounding implementation
-
-    return in.color * textureSample(texture_array[in.texture_ind], linear_sampler, in.tex_coords);
+    if in.sampler_type >= 1u {
+        return in.color * textureSample(texture_array[in.texture_ind], linear_sampler, in.tex_coords);
+    } else {
+        return in.color * textureSample(texture_array[in.texture_ind], nearest_sampler, in.tex_coords);
+    }
 }
