@@ -1,6 +1,6 @@
 use super::{ Property, PropertyCompatible, Value };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Alignment {
     TopLeft,
     TopCenter,

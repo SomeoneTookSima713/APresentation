@@ -141,6 +141,13 @@ impl Presentation {
         })
     }
 
+    pub fn reconfigure(&mut self, surface_config: &wgpu::SurfaceConfiguration) {
+        for (type_id, renderer_impl) in self.elements.element_renderer.iter() {
+            let renderer_obj = self.element_renderers.get_mut(type_id).expect("Unreachable");
+            renderer_impl.reconfigure(&mut **renderer_obj, surface_config);
+        }
+    }
+
     pub fn render(
         &mut self,
         output_view: &wgpu::TextureView,
@@ -149,6 +156,7 @@ impl Presentation {
     ) -> anyhow::Result<()> {
         let dt = self.last_time.elapsed().as_secs_f64();
         self.last_time = Instant::now();
+        tracing::info!("FPS: {}", 1.0/dt);
 
         let bgcol = self.curr_state.background_color;
 

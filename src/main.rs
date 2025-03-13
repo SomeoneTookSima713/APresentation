@@ -135,12 +135,26 @@ impl AppHandler for APresentation {
             .find(|f| f.is_srgb())
             .copied()
             .unwrap_or(surface_caps.formats[0]);
+
+        let mut surface_present_mode = surface_caps.present_modes.clone();
+        fn pmtv(p: &wgpu::PresentMode) -> u8 {
+            match p {
+                wgpu::PresentMode::AutoVsync | wgpu::PresentMode::AutoNoVsync => 0,
+                wgpu::PresentMode::Fifo => 1,
+                wgpu::PresentMode::Immediate => 2,
+                wgpu::PresentMode::FifoRelaxed => 3,
+                wgpu::PresentMode::Mailbox => 4
+            }
+        }
+
+        surface_present_mode.sort_by(|a, b| pmtv(b).cmp(&pmtv(a)));
+
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
             width: window_size.width,
             height: window_size.height,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: surface_present_mode[0],
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 4
@@ -192,6 +206,7 @@ impl AppHandler for APresentation {
                 self.surface_config.width = new_size.width;
                 self.surface_config.height = new_size.height;
                 self.surface.configure(&self.device, &self.surface_config);
+                self.presentation.reconfigure(&self.surface_config);
             },
             winit::event::WindowEvent::RedrawRequested => self.render()?,
             _ => {}

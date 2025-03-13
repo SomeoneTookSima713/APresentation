@@ -8,15 +8,15 @@ slide "MySlide" (0.1, 0.1, 0.13)
 // This creates a new Rect element
 newelem "ColorRect" Rect (
     position: (0, Rhai("h * 0.5")),
-    size: (Rhai("0.5*w"), 200),
+    size: (Rhai("0.5*w"), 600),
     anchor: TopRight,
     alignment: MidRight,
-    source: Rhai("RectSource::Image(\"test.png\", if t%2<1 { SamplerType::Linear() } else { SamplerType::Nearest() })"),
+    source: Rhai('RectSource::Image("test.png", if t%2<1 { SamplerType::Linear() } else { SamplerType::Nearest() })'),
     corner_rounding: {
-        top_left: 1.0,
+        top_left: 0.25,
         top_right: 0.5,
-        bottom_left: 1.0,
-        bottom_right: 0.5
+        bottom_left: 0.5,
+        bottom_right: 1.0
     },
     z_index: 0
 )
