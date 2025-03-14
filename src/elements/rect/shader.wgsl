@@ -68,46 +68,42 @@ var linear_sampler: sampler;
 @group(0) @binding(2)
 var nearest_sampler: sampler;
 
-fn sample_rounding(pos: vec2<f32>, size: vec2<f32>, rounding: vec4<f32>) -> bool {
-    var r: f32;
-    if pos.x<0.0 && pos.y<0.0 {
-        r = rounding.x;
-    } else if pos.x>0.0 && pos.y<0.0 {
-        r = rounding.y;
-    } else if pos.x<0.0 && pos.y>0.0 {
-        r = rounding.z;
-    } else if pos.x>0.0 && pos.y>0.0 {
-        r = rounding.w;
-    }
+fn sample_rounding(pos: vec2<f32>, size: vec2<f32>, r: f32) -> bool {
     var t = min(size.x, size.y)*r;
-    if r == 0.0 {
-        return true;
-    } else {
-        var vx = max((abs(pos.x)-size.x)/t+1.0,0.0);
-        var vy = max((abs(pos.y)-size.y)/t+1.0,0.0);
-        return vx*vx + vy*vy <= 1.0;
-    }
+    var vx = max((abs(pos.x)-size.x)/t+1.0,0.0);
+    var vy = max((abs(pos.y)-size.y)/t+1.0,0.0);
+    return vx*vx + vy*vy <= 1.0;
 }
 
 const AA_SAMPLES_PER_DIM: u32 = 4u;
 const AA_WIDTH: f32 = 2.0;
 const AA_SAMPLE_OFFSET: f32 = -0.5*AA_WIDTH;
 const AA_SAMPLE_MOVE: f32 = AA_WIDTH/f32(AA_SAMPLES_PER_DIM);
+const AA_ALPHA_DIV: f32 = 1.0/f32(AA_SAMPLES_PER_DIM*AA_SAMPLES_PER_DIM);
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    var half_pixel = vec2(0.5);
+    var rind = clamp(u32(ceil(max(in.vert_pos_local.x,0.0))), 0u, 1u) + 2u*clamp(u32(ceil(max(in.vert_pos_local.y,0.0))), 0u, 1u);
 
     var alpha = 0.0;
-    for (var i = 0u; i<AA_SAMPLES_PER_DIM*AA_SAMPLES_PER_DIM; i++) {
-        var offset = vec2(
-            f32(i%AA_SAMPLES_PER_DIM)*AA_SAMPLE_MOVE+AA_SAMPLE_OFFSET,
-            f32(i/AA_SAMPLES_PER_DIM)*AA_SAMPLE_MOVE+AA_SAMPLE_OFFSET
-        );
-        alpha += f32(sample_rounding(in.vert_pos_local + offset, in.size_local, in.rounding));
+    if in.rounding[rind] == 0.0 {
+        alpha = 1.0;
+    } else {
+        var vert_pos_perc = in.vert_pos_local / in.size_local;
+        if abs(vert_pos_perc.x) + abs(vert_pos_perc.y) < 1.0 {
+            alpha = 1.0;
+        } else {
+            for (var i = 0u; i<AA_SAMPLES_PER_DIM*AA_SAMPLES_PER_DIM; i++) {
+                var offset = vec2(
+                    f32(i%AA_SAMPLES_PER_DIM)*AA_SAMPLE_MOVE+AA_SAMPLE_OFFSET,
+                    f32(i/AA_SAMPLES_PER_DIM)*AA_SAMPLE_MOVE+AA_SAMPLE_OFFSET
+                );
+                alpha += f32(sample_rounding(in.vert_pos_local + offset, in.size_local, in.rounding[rind]));
+            }
+            alpha *= AA_ALPHA_DIV;
+        }
     }
-    alpha /= f32(AA_SAMPLES_PER_DIM*AA_SAMPLES_PER_DIM);
-
+    
     if in.sampler_type >= 1u {
         return vec4(1.0, 1.0, 1.0, alpha) * in.color * textureSample(texture_array[in.texture_ind], linear_sampler, in.tex_coords);
     } else {

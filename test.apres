@@ -10,9 +10,14 @@ newelem "ColorRect" Rect (
     position: (0, 0),
     size: (Rhai("0.5*w"), Rhai("0.5*w")),
     anchor: MidCenter,
-    alignment: Custom(Rhai("math::sin(t)*0.5 + 0.5"), 0.5),
+    alignment: Custom(Rhai("math::sin(t*0.1)*0.5 + 0.5"), 0.5),
     source: Image("test.png", Nearest),
-    rotation: Rhai("t"),
+    corner_rounding: {
+        top_left: 0.7,
+        top_right: 0.5,
+        bottom_left: 0.5,
+        bottom_right: 1.0
+    },
     z_index: 0
 )
 
