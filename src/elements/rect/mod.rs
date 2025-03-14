@@ -14,6 +14,7 @@ pub use assets::*;
 
 pub struct Rect {
     base_properties: BaseProperties,
+    rotation: Property<f64>,
     size: Property<(f64, f64)>,
     source: Property<RectSource>,
     corner_rounding: Property<CornerRounding>
@@ -111,7 +112,7 @@ impl PropertyCompatible for RectSource {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct CornerRounding {
     top_left: f64,
     top_right: f64,
@@ -167,9 +168,10 @@ impl Element for Rect {
     where Self: Sized {
         Ok(Self {
             base_properties: structure.try_get_base_properties(engine)?,
+            rotation: structure.try_get_property("rotation", engine).unwrap_or(Property::Constant(0.0)),
             size: structure.try_get_property("size", engine)?,
             source: structure.try_get_property("source", engine)?,
-            corner_rounding: structure.try_get_property("corner_rounding", engine)?
+            corner_rounding: structure.try_get_property("corner_rounding", engine).unwrap_or(Property::Constant(CornerRounding::default()))
         })
     }
 }
@@ -210,7 +212,8 @@ struct Instance {
     size: [f32; 2],
     color: [f32; 4],
     texture_ind_and_sampler: u32,
-    rounding: [f32; 4]
+    rounding: [f32; 4],
+    rot_mat: [[f32; 4]; 4]
 }
 
 impl Instance {
@@ -223,6 +226,10 @@ impl Instance {
             4 => Float32x4,
             5 => Uint32,
             6 => Float32x4,
+            7 => Float32x4,
+            8 => Float32x4,
+            9 => Float32x4,
+            10 => Float32x4
         ]
     };
 
@@ -232,9 +239,17 @@ impl Instance {
         color: [f32; 4],
         texture_ind: u32,
         sampler_is_linear: bool,
-        rounding: [f32; 4]
+        rounding: [f32; 4],
+        rotation_matrix: nalgebra::Matrix4<f32>,
     ) -> Self {
-        Self { pos, size, color, texture_ind_and_sampler: texture_ind + ((sampler_is_linear as u32) << 31), rounding }
+        Self {
+            pos,
+            size,
+            color,
+            texture_ind_and_sampler: texture_ind + ((sampler_is_linear as u32) << 31),
+            rounding,
+            rot_mat: rotation_matrix.data.0
+        }
     }
 }
 
@@ -566,9 +581,17 @@ impl ElementRenderer for RectRenderer {
             let CornerRounding { top_left, top_right, bottom_left, bottom_right } = element.corner_rounding.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("source"))?;
             [top_left as f32, top_right as f32, bottom_left as f32, bottom_right as f32]
         };
-
+        let rotation = element.rotation.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("rotation"))?;
+        
         let anchor = element.base_properties.anchor.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("anchor"))?;
         let align = element.base_properties.alignment.evaluate(&mut eval_scope, eval_engine).ok_or(eval_failed("alignment"))?;
+        
+        let translation_vec: nalgebra::Vector3<f32> = [(size.0 * (align.into_fracts().0-0.5)) as f32, (size.1 * (align.into_fracts().1-0.5)) as f32, 0.0].into();
+        
+        let rot_mat = 
+            nalgebra::Matrix4::new_translation(&translation_vec) *
+            nalgebra::Matrix4::new_rotation([0.0, 0.0, rotation as f32].into()) *
+            nalgebra::Matrix4::new_translation(&-translation_vec);
 
         let final_pos = (
             self.push_constant.window_res[0] as f64 * anchor.into_fracts().0 + pos.0 - size.0 * (align.into_fracts().0 - 0.5),
@@ -584,6 +607,7 @@ impl ElementRenderer for RectRenderer {
                     0,
                     false,
                     rounding,
+                    rot_mat
                 ));
             },
             RectSource::Image(id, sampler) => {
@@ -606,6 +630,7 @@ impl ElementRenderer for RectRenderer {
                     tex_ind as u32,
                     sampler == SamplerType::Linear,
                     rounding,
+                    rot_mat
                 ));
             }
         }

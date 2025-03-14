@@ -14,6 +14,10 @@ struct Instance {
     @location(4) color: vec4<f32>,
     @location(5) texture_ind_and_sampler_type: u32,
     @location(6) rounding: vec4<f32>,
+    @location(7) rot_mat_1: vec4<f32>,
+    @location(8) rot_mat_2: vec4<f32>,
+    @location(9) rot_mat_3: vec4<f32>,
+    @location(10) rot_mat_4: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -37,13 +41,15 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
 
+    var rot_mat = mat4x4(instance.rot_mat_1, instance.rot_mat_2, instance.rot_mat_3, instance.rot_mat_4);
+
     var vert_pos = vertex.pos.xy * instance.size;
     var pos_offset =  instance.pos.xy;
 
     out.vert_pos_local = vert_pos*2.0;
-    out.size_local = instance.size;
+    out.size_local = abs(instance.size);
 
-    out.clip_position = camera_uniform * vec4<f32>(vert_pos + pos_offset, instance.pos.z, 1.0);
+    out.clip_position = camera_uniform * vec4<f32>((rot_mat * vec4(vert_pos, 0.0, 1.0)).xy + pos_offset, instance.pos.z, 1.0);
 
     out.color = instance.color;
     out.texture_ind = instance.texture_ind_and_sampler_type & 0x7FFFFFFFu;

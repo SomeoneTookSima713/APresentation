@@ -5,21 +5,23 @@ pub mod alignment;
 pub mod base;
 
 #[derive(Clone)]
-pub enum Property<T: PropertyCompatible + 'static> {
+pub enum Property<T: PropertyCompatible + Clone + 'static> {
     Literal(T::InnerRepresentation),
-    Script(rhai::AST)
+    Script(rhai::AST),
+    Constant(T)
 }
 
-impl<T: PropertyCompatible> std::fmt::Debug for Property<T> {
+impl<T: PropertyCompatible + Clone> std::fmt::Debug for Property<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Literal(_) => write!(f, "Property<{}>::Literal", std::any::type_name::<T>()),
             Self::Script(_) => write!(f, "Property<{}>::Script", std::any::type_name::<T>()),
+            Self::Constant(_) => write!(f, "Property<{}>::Constant", std::any::type_name::<T>()),
         }
     }
 }
 
-impl<T: PropertyCompatible> Property<T> {
+impl<T: PropertyCompatible + Clone> Property<T> {
     #[tracing::instrument(skip(scope, engine))]
     pub fn evaluate(&self, scope: &mut rhai::Scope<'static>, engine: &rhai::Engine) -> Option<T> {
         match self {
@@ -27,7 +29,8 @@ impl<T: PropertyCompatible> Property<T> {
             Self::Script(ast) => match engine.eval_ast_with_scope::<T>(scope, ast) {
                 Ok(v) => Some(v),
                 Err(e) => { tracing::error!("Couldn't evaluate property of type {}: {}", std::any::type_name::<T>(), e); None }
-            }
+            },
+            Self::Constant(v) => Some(v.clone())
         }
     }
 
@@ -50,6 +53,10 @@ impl<T: PropertyCompatible> Property<T> {
             },
             v => Some(Self::Literal(T::from_value(v, engine)?))
         }
+    }
+
+    pub const fn from_constant(val: T) -> Self {
+        Self::Constant(val)
     }
 }
 

@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use hashbrown::HashMap;
+use rhai::packages::Package;
 
 pub mod parser;
 pub mod element;
@@ -95,6 +96,9 @@ impl Presentation {
             .set_max_call_levels(64)
             // .set_optimization_level(rhai::OptimizationLevel::Full)
             .set_strict_variables(false);
+
+        rhai::packages::BasicMathPackage::new().register_into_engine_as(&mut rhai_engine, "math");
+
         // TODO: Find a more modular way of doing this
         proc_macros::for_types!(
             element::property::alignment::Alignment,
@@ -156,7 +160,6 @@ impl Presentation {
     ) -> anyhow::Result<()> {
         let dt = self.last_time.elapsed().as_secs_f64();
         self.last_time = Instant::now();
-        tracing::info!("FPS: {}", 1.0/dt);
 
         let bgcol = self.curr_state.background_color;
 
