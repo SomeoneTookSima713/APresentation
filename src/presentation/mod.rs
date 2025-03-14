@@ -145,6 +145,15 @@ impl Presentation {
         })
     }
 
+    pub fn next_slide(&mut self) {
+        self.curr_state_idx += 1;
+        if self.states.get(self.curr_state_idx).is_none() {
+            self.curr_state_idx -= 1;
+            return;
+        }
+        self.curr_state.apply_new_state(self.states.get(self.curr_state_idx).unwrap().clone());
+    }
+
     pub fn reconfigure(&mut self, surface_config: &wgpu::SurfaceConfiguration) {
         for (type_id, renderer_impl) in self.elements.element_renderer.iter() {
             let renderer_obj = self.element_renderers.get_mut(type_id).expect("Unreachable");

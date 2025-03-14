@@ -194,12 +194,12 @@ impl<'a> ApresParser<'a> {
         }
     }
 
-    fn parse_to_tokens(&mut self) -> Result<(), TokenizerError> {
+    fn parse_to_tokens(&mut self, start_line: usize) -> Result<(), TokenizerError> {
         const STRING_DELIMITERS: &[char] = &['"', '\''];
         const IDENT_ADDITIONAL_CHARS: &[char] = &['_', '-'];
 
         let mut col = 0;
-        let mut line = 1;
+        let mut line = start_line;
 
         // Please ignore the convolutedness of the rest of this function...
 
@@ -468,7 +468,7 @@ impl<'a> ApresParser<'a> {
         while token_ind < token_amount-1 && let Some(token) = tokens.get(token_ind) {
             let mut traversed_tokens = 0;
 
-            // Makes code more readable by long code snippets
+            // Makes code more readable by shortening long code snippets
             macro_rules! gt { () => {{ tracing::debug!("Getting token at index {} + {}", token_ind, traversed_tokens); tokens.get(token_ind + traversed_tokens) }}; }
             macro_rules! err { ($($msg:tt)*) => { {tracing::error!($($msg)*); return Err(ParserError::ValueCreationError(anyhow::anyhow!($($msg)*))) }} }
 
@@ -539,12 +539,12 @@ impl<'a> ApresParser<'a> {
         let token_amount = tokens.len();
         if token_amount == 0 { Err(ParserError::ValueCreationError(anyhow::anyhow!("No tokens for value deserialization supplied!")))? }
 
-        if token_amount == 4 && let [
+        if token_amount >= 4 && let [
             Token::Identifier("Rhai"),
             Token::Punctuation(Punctuation::OpeningParen),
             Token::Literal(Literal::String(s, multiline)),
             Token::Punctuation(Punctuation::ClosingParen),
-        ] = &tokens[0..token_amount] {
+        ] = &tokens[0..4] {
             return Ok(Value::RhaiCode(Self::process_string(s, *multiline)))
         }
 
@@ -567,6 +567,8 @@ impl<'a> ApresParser<'a> {
                 } else {
                     None
                 };
+
+                tracing::debug!("Got enum variant! {:?}", tokens);
                 
                 Ok(Value::EnumVariant(ident.to_string(), enum_value))
             },
@@ -641,7 +643,12 @@ impl Parser for ApresParser<'static> {
 
         let mut parser = ApresParser::new(apres_string);
 
-        parser.parse_to_tokens().map_err(|e| ParserError::TokenizerError(anyhow::anyhow!(e)))?;
+        let apres_starting_line = match asset_string.lines().count() {
+            0 => 1,
+            n => n+2
+        };
+
+        parser.parse_to_tokens(apres_starting_line).map_err(|e| ParserError::TokenizerError(anyhow::anyhow!(e)))?;
         parser.parse_to_ast().map_err(|e| ParserError::GenericError(anyhow::anyhow!("{}", e)))?;
         
         let mut states = Vec::new();
@@ -695,7 +702,7 @@ impl Parser for ApresParser<'static> {
                 Command::ModifyElem { ident, value_struct } => {
                     let id = ElementID::Custom(ident.to_string());
 
-                    let parsed_struct_overlay = ParsedStructure::new(ApresParser::parse_map_value_from_tokens(&value_struct[..], value_struct.len())?);
+                    let parsed_struct_overlay = ParsedStructure::new(ApresParser::parse_map_value_from_tokens(&value_struct[1..], value_struct.len())?);
 
                     let mut parsed_struct;
                     if let Some(s) = state_element_structures.get(ident) {

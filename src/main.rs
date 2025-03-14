@@ -180,8 +180,6 @@ impl AppHandler for APresentation {
             &surface_config
         )?;
 
-        tracing::info!("{:#?}", presentation);
-
         Ok(APresentation {
             surface,
             adapter,
@@ -207,6 +205,12 @@ impl AppHandler for APresentation {
                 self.surface_config.height = new_size.height;
                 self.surface.configure(&self.device, &self.surface_config);
                 self.presentation.reconfigure(&self.surface_config);
+            },
+            winit::event::WindowEvent::KeyboardInput { event: winit::event::KeyEvent { physical_key, state, .. }, .. } => {
+                if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowRight) = physical_key
+                && let winit::event::ElementState::Pressed = state {
+                    self.presentation.next_slide();
+                }
             },
             winit::event::WindowEvent::RedrawRequested => self.render()?,
             _ => {}

@@ -10,7 +10,7 @@ newelem "ColorRect" Rect (
     position: (0, 0),
     size: (Rhai("0.5*w"), Rhai("0.5*w")),
     anchor: MidCenter,
-    alignment: Custom(Rhai("math::sin(t*0.1)*0.5 + 0.5"), 0.5),
+    alignment: MidCenter,
     source: Image("test.png", Nearest),
     corner_rounding: {
         top_left: 0.7,
@@ -21,6 +21,12 @@ newelem "ColorRect" Rect (
     z_index: 0
 )
 
-slide "MySecondSlide" (1.0, 1.0, 1.0)
+slide "MySecondSlide" (0.1, 0.1, 0.13)
+modifyelem "MySlide::ColorRect" (
+    position: (Rhai("35*t"), Rhai("140*t*t - 80*t")),
+    rotation: Rhai("-0.1*math::sqrt(t*0.2)")
+)
+
+slide "MyThirdSlide" (1.0, 1.0, 1.0)
 // Destroys the "ColorRect" element of the "MySlide" slide
 discard "MySlide::ColorRect"
