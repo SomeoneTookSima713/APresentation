@@ -2,6 +2,13 @@
 [[image]]
     path = "test.png"
 
+[[font]]
+    family = "Open Sans"
+    paths = [
+        "fonts/OpenSans-VariableFont_wdth,wght.ttf",
+        "fonts/OpenSans-Italic-VariableFont_wdth,wght.ttf"
+    ]
+
 ---
 // This creates a new slide
 slide "MySlide" (0.1, 0.1, 0.13)
@@ -17,8 +24,7 @@ newelem "ColorRect" Rect (
         top_right: 0.5,
         bottom_left: 0.5,
         bottom_right: 1.0
-    },
-    z_index: 0
+    }
 )
 
 slide "MySecondSlide" (0.1, 0.1, 0.13)
@@ -26,6 +32,22 @@ modifyelem "MySlide::ColorRect" (
     position: (Rhai("35*t"), Rhai("140*t*t - 80*t")),
     rotation: Rhai("-0.1*math::sqrt(t*0.2)")
 )
+/*
+newelem "MyText" Text (
+    position: (Rhai("0.05*w"), Rhai("0.05*w")),
+    anchor: TopLeft,
+    alignment: TopLeft,
+    text: """
+    # Heading
+    This is my testing text. If *this* gets formatted properly, I'll be **very happy**!
+
+    I also want to test multiple paragraphs of course, so I also put ~this~ it here :)
+    """,
+    style: { // The contents of this mimick CSS, with minor differences in syntax.
+
+    }
+)
+*/
 
 slide "MyThirdSlide" (1.0, 1.0, 1.0)
 // Destroys the "ColorRect" element of the "MySlide" slide

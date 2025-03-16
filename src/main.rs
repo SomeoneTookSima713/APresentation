@@ -4,6 +4,7 @@
 #![feature(array_try_from_fn)]
 #![feature(let_chains)]
 #![feature(iterator_try_collect)]
+#![feature(box_patterns)]
 
 use std::sync::{ Arc, OnceLock };
 
@@ -166,6 +167,7 @@ impl AppHandler for APresentation {
 
         let mut asset_manager = presentation::asset::AssetManager::new();
         asset_manager.register_asset_type::<elements::rect::Image>("image".to_string());
+        asset_manager.register_asset_type::<elements::text::assets::Font>("font".to_string());
 
         let mut parser_collection = presentation::parser::ParserCollection::new();
         parser_collection.register_parser::<presentation::parser::impls::apres::ApresParser>();

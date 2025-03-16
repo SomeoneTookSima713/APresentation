@@ -107,7 +107,7 @@ impl ParsedStructure {
             position: self.try_get_property("position", engine)?,
             anchor: self.try_get_property("anchor", engine)?,
             alignment: self.try_get_property("alignment", engine)?,
-            z_index: self.try_get_property("z_index", engine)?
+            z_index: self.try_get_property("z_index", engine).unwrap_or(Property::Constant(0))
         })
     }
 
