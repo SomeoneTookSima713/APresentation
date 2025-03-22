@@ -1,7 +1,7 @@
 use std::num::NonZeroU64;
 use std::sync::{ Arc, OnceLock };
 
-use ab_glyph::FontVec;
+use ab_glyph::{ FontVec, Font as FontImpl, GlyphId };
 
 use hashbrown::HashMap;
 
@@ -19,7 +19,7 @@ pub enum FontStyle {
 
 pub struct Font {
     font_files: Vec<Arc<Vec<u8>>>,
-    font_data: HashMap<(Option<u16>, FontStyle), FontVec>,
+    font_data: HashMap<(Option<u16>, FontStyle), (FontVec, GPUGlyphData)>,
     family_name: String
 }
 
@@ -52,13 +52,14 @@ pub struct GPUGlyphData {
     pub(self) curve_data: Vec<GlyphCurve>,
     pub(self) line_data: Vec<GlyphLine>,
     pub(self) glyph_slice_inds: Vec<[GlyphIndex; 8]>,
+    pub(self) glyph_to_ind: HashMap<GlyphId, usize>,
     buffers: Option<(wgpu::Buffer, wgpu::Buffer, wgpu::Buffer)>,
     bind_group: Option<wgpu::BindGroup>
 }
 
 impl GPUGlyphData {
-    pub(self) fn new(curve_data: Vec<GlyphCurve>, line_data: Vec<GlyphLine>, glyph_slice_inds: Vec<[GlyphIndex; 8]>) -> Self {
-        Self { curve_data, line_data, glyph_slice_inds, buffers: None, bind_group: None }
+    pub(self) fn new(curve_data: Vec<GlyphCurve>, line_data: Vec<GlyphLine>, glyph_slice_inds: Vec<[GlyphIndex; 8]>, glyph_to_ind: HashMap<GlyphId, usize>) -> Self {
+        Self { curve_data, line_data, glyph_slice_inds, glyph_to_ind, buffers: None, bind_group: None }
     }
 
     pub fn update_bind_group(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
@@ -207,7 +208,57 @@ impl AssetType for Font {
                         let weight = if font_info.is_variable() { None } else { Some(font_info.weight().to_number()) };
 
                         let f = FontVec::try_from_vec_and_index(font_file.as_ref().clone(), i).map_err(|e| AssetLoadError::CreationError(anyhow::anyhow!("Font parsing error: {e}")))?;
-                        font_data.insert((weight, style), f);
+
+                        let mut curve_data = Vec::new();
+                        let mut line_data = Vec::new();
+                        let mut glyph_slice_inds = Vec::new();
+                        let mut glyph_to_ind = HashMap::new();
+                        
+                        for (glyph, char) in f.codepoint_ids() {
+                            let curve_start = curve_data.len();
+                            let line_start = line_data.len();
+
+                            if let Some(outline) = f.outline(glyph) {
+                                let bounds = outline.bounds;
+                                for curve in outline.curves {
+                                    match curve {
+                                        ab_glyph::OutlineCurve::Line(start, end) => {
+                                            line_data.push(GlyphLine {
+                                                start: [
+                                                    (start.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
+                                                    (start.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
+                                                ],
+                                                end: [
+                                                    (end.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
+                                                    (end.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
+                                                ]
+                                            });
+                                        },
+                                        ab_glyph::OutlineCurve::Quad(start, control, end) => {
+                                            curve_data.push(GlyphCurve {
+                                                start: [
+                                                    (start.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
+                                                    (start.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
+                                                ],
+                                                control: [
+                                                    (control.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
+                                                    (control.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
+                                                ],
+                                                end: [
+                                                    (end.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
+                                                    (end.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
+                                                ]
+                                            });
+                                        },
+                                        ab_glyph::OutlineCurve::Cubic(_, _, _, _) => {
+                                            panic!("Cubic curves aren't supported!")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        font_data.insert((weight, style), (f, GPUGlyphData::new(curve_data, line_data, glyph_slice_inds, glyph_to_ind)));
                     }
                 } else {
                     Err(AssetLoadError::CreationError(anyhow::anyhow!("Items in 'paths' array must be strings!")))?;

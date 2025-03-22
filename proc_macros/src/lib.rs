@@ -1,11 +1,6 @@
 #![feature(proc_macro_span)]
 #![feature(let_chains)]
 
-use std::collections::HashMap;
-use std::sync::LazyLock;
-
-use parking_lot::Mutex;
-
 use quote::ToTokens;
 
 extern crate proc_macro;
