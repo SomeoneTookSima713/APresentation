@@ -218,37 +218,62 @@ impl AssetType for Font {
                             let curve_start = curve_data.len();
                             let line_start = line_data.len();
 
+                            let mut curves: [Vec<GlyphCurve>; 8] = std::array::from_fn(|_| Vec::new());
+                            let mut lines: [Vec<GlyphLine>; 8] = std::array::from_fn(|_| Vec::new());
+
                             if let Some(outline) = f.outline(glyph) {
                                 let bounds = outline.bounds;
                                 for curve in outline.curves {
                                     match curve {
                                         ab_glyph::OutlineCurve::Line(start, end) => {
-                                            line_data.push(GlyphLine {
-                                                start: [
-                                                    (start.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
-                                                    (start.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
-                                                ],
-                                                end: [
-                                                    (end.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
-                                                    (end.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
-                                                ]
-                                            });
+                                            let line_bounds = (
+                                                ((start.y - bounds.min.y) / (bounds.max.y - bounds.min.y)).min((end.y - bounds.min.y) / (bounds.max.y - bounds.min.y)),
+                                                ((start.y - bounds.min.y) / (bounds.max.y - bounds.min.y)).max((end.y - bounds.min.y) / (bounds.max.y - bounds.min.y)),
+                                            );
+
+                                            for i in 0..8 {
+                                                if !(line_bounds.0>(i as f32+1.0)/8.0 || line_bounds.1<(i as f32)/8.0) {
+                                                    lines[i].push(GlyphLine {
+                                                        start: [
+                                                            (start.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
+                                                            (start.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
+                                                        ],
+                                                        end: [
+                                                            (end.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
+                                                            (end.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
+                                                        ]
+                                                    });
+                                                }
+                                            }
                                         },
                                         ab_glyph::OutlineCurve::Quad(start, control, end) => {
-                                            curve_data.push(GlyphCurve {
-                                                start: [
-                                                    (start.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
-                                                    (start.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
-                                                ],
-                                                control: [
-                                                    (control.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
-                                                    (control.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
-                                                ],
-                                                end: [
-                                                    (end.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
-                                                    (end.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
-                                                ]
-                                            });
+                                            let curve_bounds = (
+                                                ((start.y - bounds.min.y) / (bounds.max.y - bounds.min.y))
+                                                .min((end.y - bounds.min.y) / (bounds.max.y - bounds.min.y))
+                                                .min((control.y - bounds.min.y) / (bounds.max.y - bounds.min.y)),
+                                                ((start.y - bounds.min.y) / (bounds.max.y - bounds.min.y))
+                                                .max((end.y - bounds.min.y) / (bounds.max.y - bounds.min.y))
+                                                .max((control.y - bounds.min.y) / (bounds.max.y - bounds.min.y))
+                                            );
+
+                                            for i in 0..8 {
+                                                if !(curve_bounds.0>(i as f32+1.0)/8.0 || curve_bounds.1<(i as f32)/8.0) {
+                                                    curves[i].push(GlyphCurve {
+                                                        start: [
+                                                            (start.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
+                                                            (start.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
+                                                        ],
+                                                        control: [
+                                                            (control.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
+                                                            (control.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
+                                                        ],
+                                                        end: [
+                                                            (end.x - bounds.min.x) / (bounds.max.x - bounds.min.x),
+                                                            (end.y - bounds.min.y) / (bounds.max.y - bounds.min.y)
+                                                        ]
+                                                    });
+                                                }
+                                            }
                                         },
                                         ab_glyph::OutlineCurve::Cubic(_, _, _, _) => {
                                             panic!("Cubic curves aren't supported!")
@@ -256,6 +281,24 @@ impl AssetType for Font {
                                     }
                                 }
                             }
+
+                            for i in 0..8 {
+                                curve_data.extend_from_slice(&curves[i]);
+                                line_data.extend_from_slice(&lines[i]);
+                            }
+                            glyph_to_ind.insert(glyph, glyph_slice_inds.len());
+                            let mut l = (0,0);
+                            glyph_slice_inds.push(std::array::from_fn(|i| {
+                                let r = GlyphIndex {
+                                    curve_start: (curve_start+l.0) as u32,
+                                    curve_len: (curves[i].len()) as u32,
+                                    line_start: (line_start+l.1) as u32,
+                                    line_len: (lines[i].len()) as u32
+                                };
+                                l.0 += curves[i].len();
+                                l.1 += lines[i].len();
+                                r
+                            }));
                         }
 
                         font_data.insert((weight, style), (f, GPUGlyphData::new(curve_data, line_data, glyph_slice_inds, glyph_to_ind)));
