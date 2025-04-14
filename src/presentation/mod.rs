@@ -112,6 +112,9 @@ impl Presentation {
             }
         );
 
+        // Initialize all the asset loaders
+        asset_manager.initialize_asset_loaders(asset::AssetLoadingParams { gpu_device: device.clone(), gpu_queue: queue.clone() });
+
         let mut file = std::fs::File::open(filename).map_err(|_| PresentationCreationError::FileOpenError)?;
         let states = parser_collection.parse(
             &mut file,

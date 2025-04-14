@@ -1,4 +1,5 @@
 pub mod improved_app_handler;
+pub mod renderer_camera;
 
 #[allow(unused_macros)]
 macro_rules! structural_eq {

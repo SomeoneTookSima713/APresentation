@@ -16,7 +16,8 @@ pub use text_parser::TextProperty;
 pub struct Text {
     base_properties: BaseProperties,
     text: Property<TextProperty>,
-    size: Property<Option<(f64, f64)>>
+    size: Property<Option<(f64, f64)>>,
+    font: Property<String>
 }
 
 impl BasePropertiesProvider for Text {
@@ -33,7 +34,8 @@ impl Element for Text {
         Ok(Self {
             base_properties: structure.try_get_base_properties(engine)?,
             text: structure.try_get_property("text", engine)?,
-            size: structure.try_get_property("size", engine).unwrap_or(Property::Constant(None))
+            size: structure.try_get_property("size", engine).unwrap_or(Property::Constant(None)),
+            font: structure.try_get_property("font", engine)?
         })
     }
 }

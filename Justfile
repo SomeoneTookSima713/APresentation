@@ -15,5 +15,7 @@ run-dev *ARGS: (build-dev (replace_regex(ARGS, "--\\s.+", ""))) (setup_running_e
 run-release *ARGS: (build-release (replace_regex(ARGS, "--\\s.+", ""))) (setup_running_env)
     cd run/ && ../target/release/{{file}} {{ replace_regex(ARGS, ".*--\\s", "") }}
 
+run-tracy-dev *ARGS: (run-dev ("-F tracing-tracy "+ ARGS))
+
 setup_running_env:
     mkdir -p run/

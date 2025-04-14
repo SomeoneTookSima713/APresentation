@@ -239,13 +239,14 @@ impl<'a> ApresParser<'a> {
                 last_char = c;
                 continue;
             } else if in_string {
-                // tracing::debug!("In String! {c}");
+                // tracing::debug!("In String! '{c}' {is_multiline_string}");
                 if is_multiline_string {
                     if c == string_quote_type && self.erroring_peek(col, line)?.1 == string_quote_type {
                         self.advance();
                         if self.erroring_peek(col, line)?.1 == string_quote_type {
                             self.push_token((Token::Literal(Literal::String(&self.file[token_start+3..i], true)), token_location));
                             in_string = false;
+                            self.advance();
                         }
                     }
                 } else if c == string_quote_type && last_char != '\\' {

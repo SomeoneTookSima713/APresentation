@@ -10,6 +10,7 @@ use crate::presentation::asset;
 use asset::{ AssetType, AssetLoadingParams, AssetLoadError };
 
 pub static GLYPH_DATA_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
+pub static GLYPH_DATA_COMPUTE_PIPELINE: OnceLock<(wgpu::PipelineLayout, wgpu::ComputePipeline)> = OnceLock::new();
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum FontStyle {
@@ -18,9 +19,9 @@ pub enum FontStyle {
 }
 
 pub struct Font {
-    font_files: Vec<Arc<Vec<u8>>>,
-    font_data: HashMap<(Option<u16>, FontStyle), (FontVec, GPUGlyphData)>,
-    family_name: String
+    pub font_files: Vec<Arc<Vec<u8>>>,
+    pub font_data: HashMap<(Option<u16>, FontStyle), (FontVec, GPUGlyphData)>,
+    pub family_name: String
 }
 
 #[repr(C)]
@@ -53,7 +54,7 @@ pub struct GPUGlyphData {
     pub(self) line_data: Vec<GlyphLine>,
     pub(self) glyph_slice_inds: Vec<[GlyphIndex; 8]>,
     pub(self) glyph_to_ind: HashMap<GlyphId, usize>,
-    buffers: Option<(wgpu::Buffer, wgpu::Buffer, wgpu::Buffer)>,
+    buffers: Option<(wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer)>,
     bind_group: Option<wgpu::BindGroup>
 }
 
@@ -62,10 +63,11 @@ impl GPUGlyphData {
         Self { curve_data, line_data, glyph_slice_inds, glyph_to_ind, buffers: None, bind_group: None }
     }
 
+    #[tracing::instrument(skip(device, queue))]
     pub fn update_bind_group(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         use wgpu::util::{ BufferInitDescriptor, DeviceExt };
         
-        if let Some((cbuf, lbuf, ibuf)) = &mut self.buffers {
+        if let Some((cbuf, lbuf, ibuf, _)) = &mut self.buffers {
             let new_cbuf_contents = bytemuck::cast_slice(&self.curve_data);
             let new_lbuf_contents = bytemuck::cast_slice(&self.line_data);
             let new_ibuf_contents = bytemuck::cast_slice(&self.glyph_slice_inds);
@@ -102,19 +104,25 @@ impl GPUGlyphData {
         } else {
             self.buffers = Some((
                 device.create_buffer_init(&BufferInitDescriptor {
-                    label: None,
+                    label: Some("Glyph Data Curve Buffer"),
                     contents: bytemuck::cast_slice(&self.curve_data),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST
                 }),
                 device.create_buffer_init(&BufferInitDescriptor {
-                    label: None,
+                    label: Some("Glyph Data Line Buffer"),
                     contents: bytemuck::cast_slice(&self.line_data),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST
                 }),
                 device.create_buffer_init(&BufferInitDescriptor {
-                    label: None,
+                    label: Some("Glyph Data Index Buffer"),
                     contents: bytemuck::cast_slice(&self.glyph_slice_inds),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST
+                }),
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Glyph Data Computed Curve Data Buffer"),
+                    size: (self.curve_data.len() * std::mem::size_of::<[f32;9]>()) as wgpu::BufferAddress,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false
                 })
             ))
         }
@@ -133,7 +141,7 @@ impl GPUGlyphData {
                     })
                 },
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding: 1,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                         buffer: &bufs.1,
                         offset: 0,
@@ -141,15 +149,35 @@ impl GPUGlyphData {
                     })
                 },
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding: 2,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                         buffer: &bufs.2,
                         offset: 0,
                         size: NonZeroU64::new((self.glyph_slice_inds.len() * std::mem::size_of::<GlyphIndex>()) as wgpu::BufferAddress)
                     })
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &bufs.3,
+                        offset: 0,
+                        size: NonZeroU64::new((self.curve_data.len() * std::mem::size_of::<[f32; 9]>()) as wgpu::BufferAddress)
+                    })
+                },
             ]
-        }))
+        }));
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        tracing::debug!("Dispatching Comute Pipeline workload!");
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Compute Pipeline Pass"), timestamp_writes: None });
+        pass.set_pipeline(GLYPH_DATA_COMPUTE_PIPELINE.get().map(|(_, b)| b).unwrap());
+        pass.set_bind_group(0, self.bind_group.as_ref().unwrap(), &[]);
+        pass.dispatch_workgroups(self.curve_data.len().div_ceil(16) as u32, 1, 1);
+
+        drop(pass);
+
+        queue.submit([encoder.finish()]);
     }
     
     pub fn get_bind_group(&self) -> Option<&wgpu::BindGroup> {
@@ -158,30 +186,60 @@ impl GPUGlyphData {
 }
 
 impl AssetType for Font {
+    #[tracing::instrument(skip(loading_params))]
     fn global_init(loading_params: AssetLoadingParams) {
         GLYPH_DATA_BIND_GROUP_LAYOUT.set(loading_params.gpu_device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Glyph Data Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
                     count: None
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: true, min_binding_size: None },
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
                     count: None
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: true, min_binding_size: None },
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+                    count: None
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None },
                     count: None
                 }
             ]
         })).unwrap_or_else(|_| tracing::error!("Initializer functions of assets should only be called once!"));
+        tracing::debug!("Created Glyph Data Compute Pipeline!");
+        GLYPH_DATA_COMPUTE_PIPELINE.set({
+            let pipeline_layout = loading_params.gpu_device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Glyph Data Compute Pipeline Layout"),
+                bind_group_layouts: &[
+                    GLYPH_DATA_BIND_GROUP_LAYOUT.get().unwrap()
+                ],
+                push_constant_ranges: &[]
+            });
+
+            let shader = loading_params.gpu_device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+
+            let pipeline = loading_params.gpu_device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Glyph Data Compute Pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: Some("compute_curve_angles"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                cache: None
+            });
+
+            (pipeline_layout, pipeline)
+        }).unwrap_or_else(|_| {});
     }
 
     fn load_asset(data: toml::Table, loading_params: AssetLoadingParams) -> Result<(String, Self), AssetLoadError>
@@ -214,7 +272,7 @@ impl AssetType for Font {
                         let mut glyph_slice_inds = Vec::new();
                         let mut glyph_to_ind = HashMap::new();
                         
-                        for (glyph, char) in f.codepoint_ids() {
+                        for (glyph, _) in f.codepoint_ids() {
                             let curve_start = curve_data.len();
                             let line_start = line_data.len();
 
@@ -301,7 +359,9 @@ impl AssetType for Font {
                             }));
                         }
 
-                        font_data.insert((weight, style), (f, GPUGlyphData::new(curve_data, line_data, glyph_slice_inds, glyph_to_ind)));
+                        let mut glyph_data = GPUGlyphData::new(curve_data, line_data, glyph_slice_inds, glyph_to_ind);
+                        glyph_data.update_bind_group(&loading_params.gpu_device, &loading_params.gpu_queue);
+                        font_data.insert((weight, style), (f, glyph_data));
                     }
                 } else {
                     Err(AssetLoadError::CreationError(anyhow::anyhow!("Items in 'paths' array must be strings!")))?;

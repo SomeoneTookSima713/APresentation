@@ -164,6 +164,8 @@ impl AppHandler for APresentation {
         let mut reg_elems = presentation::element::RegisteredElements::new();
         reg_elems.register_element::<elements::rect::Rect>("Rect".to_string());
         reg_elems.register_element_renderer::<elements::rect::RectRenderer>();
+        reg_elems.register_element::<elements::text::Text>("Text".to_string());
+        reg_elems.register_element_renderer::<elements::text::TextRenderer>();
 
         let mut asset_manager = presentation::asset::AssetManager::new();
         asset_manager.register_asset_type::<elements::rect::Image>("image".to_string());
@@ -247,6 +249,7 @@ impl APresentation {
 }
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(not(feature="tracing-tracy"))]
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
             .with_ansi(true)
@@ -262,6 +265,13 @@ fn main() -> anyhow::Result<()> {
             .pretty()
             .finish()
     ).expect("Couldn't initialize logger!");
+    #[cfg(feature="tracing-tracy")]
+    {
+        use tracing_subscriber::{ Registry, Layer, prelude::* };
+        tracing::subscriber::set_global_default(
+            tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default())
+        ).expect("Couldn't initialize logger!");
+    }
 
     use clap::Parser;
     let cli = cli::CLI::parse();

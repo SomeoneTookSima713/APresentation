@@ -72,8 +72,8 @@ impl Value {
             (Self::Map(vals), ValueStructure::Map(s)) => vals.values().all(|v| v.validate_structure(*s)),
             // I think this match arm really needs some explaining:
             // It checks if there is any enum variant in the given structure that matches the
-            // value's variant and if the associated data (as long as it should exist) matches the
-            // structure defined for it.
+            // value's variant and wether the associated data (as long as it should exist) matches
+            // the structure defined for it.
             (Self::EnumVariant(var, v), ValueStructure::Enum(structures)) => structures.iter().find(|(svar, s)| var.eq(*svar) && v.is_some() == s.is_some() && v.as_ref().and_then(|v| s.map(|s| v.validate_structure(s))).unwrap_or(true)).is_some(),
             (Self::RhaiCode(_), _) => true,
             (v, ValueStructure::Or(structures)) => structures.iter().any(|s| v.validate_structure(*s)),
@@ -87,8 +87,10 @@ impl Value {
 pub struct ParsedStructure(HashMap<String, Value>);
 
 impl ParsedStructure {
+    #[inline(always)]
     pub fn new(map: HashMap<String, Value>) -> Self { Self(map) }
 
+    #[inline(always)]
     pub fn try_get_property<'a, T: PropertyCompatible, S>(&self, idx: &'a S, engine: &rhai::Engine) -> anyhow::Result<Property<T>>
     where
         String: std::borrow::Borrow<S>,
@@ -102,6 +104,7 @@ impl ParsedStructure {
         }
     }
 
+    #[inline(always)]
     pub fn try_get_base_properties(&self, engine: &rhai::Engine) -> anyhow::Result<BaseProperties> {
         Ok(BaseProperties {
             position: self.try_get_property("position", engine)?,
@@ -111,7 +114,10 @@ impl ParsedStructure {
         })
     }
 
+    #[inline(always)]
     pub fn inner(&self) -> &HashMap<String, Value> { &self.0 }
+    #[inline(always)]
     pub fn inner_mut(&mut self) -> &mut HashMap<String, Value> { &mut self.0 }
+    #[inline(always)]
     pub fn into_inner(self) -> HashMap<String, Value> { self.0 }
 }

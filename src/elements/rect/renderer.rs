@@ -1,3 +1,4 @@
+use crate::util::renderer_camera;
 use super::*;
 
 #[repr(C)]
@@ -83,12 +84,6 @@ struct PushConstant {
     window_res: [u32; 2]
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct CameraUniform {
-    matrix: [[f32; 4]; 4]
-}
-
 /// Concept for the render model:
 /// 
 /// We have one big bind group containing all the textures needed for the
@@ -101,8 +96,7 @@ pub struct RectRenderer {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     instance_buffer: wgpu::Buffer,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
+    camera_uniform: renderer_camera::CameraUniform,
     push_constant: PushConstant,
     push_constant_start: u32,
     /// A white dummy texture for rectangles not using an image.
@@ -118,8 +112,6 @@ pub struct RectRenderer {
     ibg_reconstruct_necessary: bool,
     current_rect_instances: Vec<Instance>
 }
-
-static CAMERA_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
 
 static IMAGE_ARR_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
 const IMAGE_ARR_MAX_ITEMS: std::num::NonZero<u32> = std::num::NonZero::<u32>::new(128).unwrap();
@@ -138,18 +130,7 @@ impl ElementRenderer for RectRenderer {
 
         use wgpu::util::{ BufferInitDescriptor, DeviceExt };
 
-        let mut set_succeeded = CAMERA_BIND_GROUP_LAYOUT.set(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Rect Caera Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
-                    count: None
-                }
-            ]
-        })).is_err();
-        set_succeeded = set_succeeded || IMAGE_ARR_BIND_GROUP_LAYOUT.set(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let mut set_succeeded = IMAGE_ARR_BIND_GROUP_LAYOUT.set(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Rect Image Array Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -189,7 +170,7 @@ impl ElementRenderer for RectRenderer {
             label: None,
             bind_group_layouts: &[
                 IMAGE_ARR_BIND_GROUP_LAYOUT.get().expect("Unreachable"),
-                CAMERA_BIND_GROUP_LAYOUT.get().expect("Unreachable")
+                renderer_camera::get_cam_bind_group_layout(&device)
             ],
             push_constant_ranges: &[wgpu::PushConstantRange {
                 stages: wgpu::ShaderStages::VERTEX,
@@ -235,30 +216,7 @@ impl ElementRenderer for RectRenderer {
             cache: None
         });
 
-        let camera_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("Rect Renderer Camera Uniform Buffer"),
-            contents: bytemuck::cast_slice(&[CameraUniform {
-                matrix: nalgebra::Orthographic3::new(
-                    0.0,
-                    surface_config.width as f32,
-                    surface_config.height as f32,
-                    0.0,
-                    1000.0,
-                    -1.0,
-                ).as_matrix().data.0
-            }]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST
-        });
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Rect Renderer Camera Uniform Bind Group"),
-            layout: &CAMERA_BIND_GROUP_LAYOUT.get().expect("Unreachable"),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(camera_buffer.as_entire_buffer_binding())
-                }
-            ]
-        });
+        let camera_uniform = renderer_camera::CameraUniform::new(0.0, 0.0, surface_config.width as f32, surface_config.height as f32);
 
         let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Rect Renderer Vertex Buffer"),
@@ -350,8 +308,7 @@ impl ElementRenderer for RectRenderer {
             render_pipeline,
             vertex_buffer,
             instance_buffer,
-            camera_buffer,
-            camera_bind_group,
+            camera_uniform,
             push_constant,
             push_constant_start: push_constant_range.start,
             dummy_texture: (dummy_texture, dummy_texture_view),
@@ -367,16 +324,7 @@ impl ElementRenderer for RectRenderer {
     fn reconfigure(&mut self, surface_config: &wgpu::SurfaceConfiguration) {
         self.push_constant.window_res = [surface_config.width, surface_config.height];
 
-        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[CameraUniform {
-            matrix: nalgebra::Orthographic3::new(
-                0.0,
-                surface_config.width as f32,
-                surface_config.height as f32,
-                0.0,
-                1000.0,
-                -1.0,
-            ).as_matrix().data.0
-        }]));
+        self.camera_uniform.update_cam_rect(0.0, 0.0, surface_config.width as f32, surface_config.height as f32);
     }
 
     fn submit_to_render(
@@ -501,7 +449,7 @@ impl ElementRenderer for RectRenderer {
 
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.image_bind_group, &[]);
-        render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+        render_pass.set_bind_group(1, self.camera_uniform.update_and_get_bind_group(&self.device, &self.queue), &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..instance_data_bytes.len() as wgpu::BufferAddress));
         render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, self.push_constant_start, bytemuck::cast_slice(&[self.push_constant]));

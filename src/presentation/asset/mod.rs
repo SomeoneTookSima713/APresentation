@@ -31,7 +31,8 @@ pub trait AssetType {
 
 pub struct RegisteredAssetType {
     pub asset_type_id: TypeId,
-    load_asset_fn: Box<dyn Fn(Table, AssetLoadingParams) -> Result<(String, Box<dyn Any>), AssetLoadError>>
+    load_asset_fn: Box<dyn Fn(Table, AssetLoadingParams) -> Result<(String, Box<dyn Any>), AssetLoadError>>,
+    global_init_fn: fn(AssetLoadingParams)
 }
 
 impl std::fmt::Debug for RegisteredAssetType {
@@ -44,7 +45,8 @@ impl RegisteredAssetType {
     pub(self) fn new<T: AssetType + 'static>() -> Self {
         Self {
             asset_type_id: TypeId::of::<T>(),
-            load_asset_fn: Box::new(|t, p| T::load_asset(t, p).map(|(k, v)| (k, Box::new(v) as Box<dyn Any>)))
+            load_asset_fn: Box::new(|t, p| T::load_asset(t, p).map(|(k, v)| (k, Box::new(v) as Box<dyn Any>))),
+            global_init_fn: T::global_init
         }
     }
 
@@ -73,6 +75,12 @@ impl AssetManager {
     pub fn get_asset_type_from_name<Q>(&self, name: &Q) -> Option<TypeId>
     where Q: std::hash::Hash + hashbrown::Equivalent<String> + ?Sized {
         self.asset_type_names.get(name).copied()
+    }
+
+    pub fn initialize_asset_loaders(&self, loading_params: AssetLoadingParams) {
+        for asset_types in self.registered_asset_types.values() {
+            (asset_types.global_init_fn)(loading_params.clone())
+        }
     }
 
     pub fn load_asset<A: AssetType + 'static>(&mut self, data: Table, loading_params: AssetLoadingParams) -> Result<String, AssetLoadError> {

@@ -32,22 +32,23 @@ modifyelem "MySlide::ColorRect" (
     position: (Rhai("35*t"), Rhai("140*t*t - 80*t")),
     rotation: Rhai("-0.1*math::sqrt(t*0.2)")
 )
-/*
+
 newelem "MyText" Text (
     position: (Rhai("0.05*w"), Rhai("0.05*w")),
     anchor: TopLeft,
     alignment: TopLeft,
+    font: "Open Sans",
     text: """
     # Heading
     This is my testing text. If *this* gets formatted properly, I'll be **very happy**!
 
-    I also want to test multiple paragraphs of course, so I also put ~this~ it here :)
-    """,
-    style: { // The contents of this mimick CSS, with minor differences in syntax.
+    I also want to test multiple paragraphs of course, so I also put ~that~ this here :)
+    """
+    /*style: { // The contents of this mimick CSS, with minor differences in syntax.
 
-    }
+    }*/
 )
-*/
+
 
 slide "MyThirdSlide" (1.0, 1.0, 1.0)
 // Destroys the "ColorRect" element of the "MySlide" slide
